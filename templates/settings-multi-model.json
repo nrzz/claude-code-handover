@@ -1,0 +1,8 @@
+{
+  "effortLevel": "high",
+  "modelSettings": {
+    "claude-sonnet-5-5": { "effortLevel": "medium" }
+  },
+  "env": { "CLAUDE_CODE_SUBAGENT_MODEL": "sonnet" },
+  "cleanupPeriodDays": 365
+}
