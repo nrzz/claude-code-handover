@@ -11,10 +11,10 @@ Stream to update: $ARGUMENTS. If empty, use the stream this session worked on. L
 
 Rules:
 
-1. The whole file stays under 60 lines. Plain sentences. Current state only, no history.
+1. The whole file stays under 60 lines. Plain sentences. Current state only, no history. Keep the Pointers section at the end.
 2. Fill the stream's section with exactly these lines:
    - Current task: one line.
-   - Done this session: at most five dated bullets.
+   - Done recently: at most five dated bullets.
    - Next step: the exact first prompt for the next session, with its done-when.
    - Open decisions or blockers: who owes what.
    - Files in play: paths only.

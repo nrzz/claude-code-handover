@@ -2,6 +2,8 @@
 
 Short sessions, a handover file that every new session loads by itself, and effort defaults that stop the model from overthinking. Set up with one pasted prompt. Measured on five weeks of real usage before it existed.
 
+**Quick start:** open [SETUP-PROMPT.md](SETUP-PROMPT.md), fill the two lines at the top, paste the block into a new Claude Code session in your project folder, and follow the four lines it prints at the end. Nothing you already have is overwritten: existing files are appended to or left alone, and the report says which.
+
 ## The problem, measured
 
 An audit of 19 sessions and 1,840 requests over five weeks (23 Aug to 30 Sep 2026), weighed at API list prices:
@@ -41,6 +43,10 @@ Durable facts live in Claude's auto memory. Ticket status lives in your tracker.
 
 The files it creates are also in [templates/](templates/) and [skills/handover/SKILL.md](skills/handover/SKILL.md) if you prefer to copy them by hand.
 
+Edge cases the prompt handles on its own: a folder that is not a git repository (the rules go in CLAUDE.md instead of CLAUDE.local.md), a repository that uses AGENTS.md (the new file imports it so it keeps loading), an existing CLAUDE.local.md or .gitignore (appended, never replaced), an existing HANDOVER.md (kept, with only the missing stream sections added), a CLAUDE.local.md that git already tracks (flagged, with the untrack command for you to run), a model list without Sonnet (Haiku does the chores and becomes the subagent model, and the rules card names your models), and settings that already hold other models or variables (merged at key level, with saved per-model efforts brought in line).
+
+Terminal users: run `/statusline` once so the context percentage is always visible; the desktop app shows it in the composer.
+
 ## Daily loop
 
 - Morning: new session, model and effort from the table below, type `continue <stream>`. Done when the first reply names the next step.
@@ -76,7 +82,7 @@ Pick model and effort once at session start. Never switch model mid-session: eac
 
 ## Audit your own usage
 
-Two Node scripts read the local transcripts in `~/.claude/projects` (nothing leaves your machine) and print the same tables as above:
+Two Node scripts (Node 18 or newer, no dependencies) read the local transcripts in `~/.claude/projects` (nothing leaves your machine) and print the same tables as above:
 
 ```bash
 node scripts/usage-report.mjs
@@ -93,7 +99,7 @@ Dollar figures are estimates at published API list prices, useful as the yardsti
 Checked on 2026-10-01 with Claude Code 2.1.284 in the desktop app on Windows:
 
 - **Loading.** A fresh session process was asked, with tools forbidden, to quote marker lines. It quoted a marker from CLAUDE.local.md in the working folder and a second marker from a file pulled in by an `@` import inside it, and it listed a test skill placed under the project's `.claude/skills/` and another under `~/.claude/skills/`. So the three mechanisms this workflow relies on work as the docs describe.
-- **The setup prompt.** An agent ran it end to end in a throwaway git repo with "Opus + Sonnet" and two streams. The files it produced were diffed against the templates in this repo: CLAUDE.local.md and the skill byte-identical, the rules card equal to the template minus the one-model table, the handover with one section per stream, the personal files ignored by git, and the settings file merged without touching existing keys.
+- **The setup prompt.** Agents ran it end to end in throwaway folders, and every file they produced was diffed against the templates in this repo. Scenarios covered: a git repo with "Opus + Sonnet" and two streams (CLAUDE.local.md and the skill byte-identical, rules card equal to the template minus the one-model table, one handover section per stream, personal files git-ignored, settings merged without touching existing keys); a folder that is not a git repository, has an AGENTS.md and "Opus only" (rules went to CLAUDE.md with `@AGENTS.md` as its first line, one-model table, single-model settings, a saved xhigh entry for another model brought down to medium); and a repo that already had a shared CLAUDE.md, a CLAUDE.local.md, a HANDOVER.md and a .gitignore, with "Opus + Haiku" (existing lines kept and the block appended, shared CLAUDE.md untouched, only missing .gitignore lines added, Haiku set as the subagent model, no Sonnet entry written).
 - **The scripts** ran against five weeks of real transcripts and against an empty folder.
 
 Not covered: managed or organisation settings that override user settings (the prompt reports and skips those), and the `/handover` entry in the composer menu, which is hidden from the model on purpose (`disable-model-invocation: true`), so only you can see it. Type `/` in a new session to confirm it is there.

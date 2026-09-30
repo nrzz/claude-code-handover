@@ -1,4 +1,7 @@
 {
   "effortLevel": "medium",
+  "modelSettings": {
+    "<the model id you run on>": { "effortLevel": "medium" }
+  },
   "cleanupPeriodDays": 365
 }

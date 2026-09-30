@@ -6,19 +6,22 @@ Fill the two lines at the top, then paste the whole block into a new Claude Code
 MODELS I HAVE: <Opus only | Opus + Sonnet | Fable + Opus + Sonnet | Sonnet only>
 MY STREAMS: <two or three names for the work streams in this folder, for example backend, frontend, infra>
 
-Set up my token-saving workflow in this folder using the two lines above. Do all steps in this one session without asking me questions; where something is unclear, take the default I give and say so in the final report.
+Set up my token-saving workflow in this folder using the two lines above. Do all steps in this one session without asking me questions; where something is unclear, take the default I give and say so in the final report. Never destroy anything that already exists: where a file you are told to create is already there, append or skip as each step says, and report it.
 
 Background: long-lived chats waste usage two ways. Every return after a break longer than an hour re-writes the whole context to cache, and the same files get re-read many times after the chat is summarised. From now on: one task per session, a handover at a natural stop once the context bar passes 35 percent (hard stop at 50), a fresh session after any break longer than an hour unless the bar is under 15 percent, and a handover file that every new session loads by itself.
 
 ## Step 1: check the ground
 
-- Say whether this folder is a git repository, and whether a CLAUDE.md already exists here or in a parent folder. Never modify an existing CLAUDE.md. My personal rules go in CLAUDE.local.md.
+- Say whether this folder is a git repository, whether a CLAUDE.md already exists here or in a parent folder, and whether an AGENTS.md exists here. Never modify an existing CLAUDE.md or AGENTS.md. My personal rules go in CLAUDE.local.md.
 - Read the user settings file at ~/.claude/settings.json (Windows: C:\Users\<me>\.claude\settings.json). Create it as {} if it is missing. If a managed or organization setting would override any key from Step 6, say so in the report and skip that key.
 - Note the exact model id this session runs on.
 
 ## Step 2: personal rules file
 
-Create CLAUDE.local.md in this folder (use CLAUDE.md only if this is not a git repository and no CLAUDE.md exists) with exactly this content:
+Create CLAUDE.local.md in this folder with exactly the content below. Three exceptions:
+- If this folder is not a git repository and has no CLAUDE.md, name the file CLAUDE.md instead.
+- If the file you are about to create already exists, keep its content and append the block below after a blank line instead of overwriting it.
+- If an AGENTS.md exists here and no CLAUDE.md does, make `@AGENTS.md` the first line of the file, so AGENTS.md keeps loading.
 
 ```
 # Personal working rules (not committed)
@@ -40,7 +43,7 @@ Sessions are short: one task per session, then a fresh session. State between se
 
 ## Step 3: the handover file
 
-Create HANDOVER.md next to it with this content, one section per stream from MY STREAMS:
+Create HANDOVER.md next to it with this content, one section per stream from MY STREAMS. If HANDOVER.md already exists, keep everything in it and append only the stream sections and the Pointers block that are missing, then say so in the report.
 
 ```
 # Handover (rewritten whole each time; under 60 lines; current state only)
@@ -60,7 +63,7 @@ Updated: <today> by the setup session. No work has been handed over yet.
 
 ## Step 4: the /handover command
 
-Create the skill at ~/.claude/skills/handover/SKILL.md (user level, so it is never committed and works in every project) with exactly this content:
+Create the skill at ~/.claude/skills/handover/SKILL.md (user level, so it is never committed and works in every project) with exactly this content. An existing copy is replaced; it is the same file.
 
 ```
 ---
@@ -76,10 +79,10 @@ Stream to update: $ARGUMENTS. If empty, use the stream this session worked on. L
 
 Rules:
 
-1. The whole file stays under 60 lines. Plain sentences. Current state only, no history.
+1. The whole file stays under 60 lines. Plain sentences. Current state only, no history. Keep the Pointers section at the end.
 2. Fill the stream's section with exactly these lines:
    - Current task: one line.
-   - Done this session: at most five dated bullets.
+   - Done recently: at most five dated bullets.
    - Next step: the exact first prompt for the next session, with its done-when.
    - Open decisions or blockers: who owes what.
    - Files in play: paths only.
@@ -91,11 +94,11 @@ Rules:
 
 ## Step 5: keep personal files out of the repo
 
-If this folder is a git repository, add CLAUDE.local.md, HANDOVER.md and claude-token-rules.md to .gitignore (create it if needed) and confirm with git status that none of the three shows as untracked.
+If this folder is a git repository, make sure .gitignore lists CLAUDE.local.md, HANDOVER.md and claude-token-rules.md: create the file if it is missing, otherwise append only the lines that are not there yet. Run git status after Step 7, when all three files exist, and confirm that none of them shows as untracked. If one of them is already tracked by git, .gitignore cannot hide it: do not change the index, but put the exact untrack command (git rm --cached <file>) in the report for me to run. If this folder is not a git repository, skip this step and say so.
 
 ## Step 6: settings, chosen from MODELS I HAVE
 
-Back up the user settings file as settings.json.bak-<today>, then merge the matching block into it, keeping every existing key. Print the result and confirm it parses as JSON.
+Back up the user settings file as settings.json.bak-<today>, then merge the matching block into it at key level: every existing key stays, other models' entries inside modelSettings stay, other variables inside env stay; only the keys in the block are set. Print the result and confirm it parses as JSON.
 
 If I have more than one model:
 
@@ -115,15 +118,20 @@ If I have one model only:
 ```
 {
   "effortLevel": "medium",
+  "modelSettings": {
+    "<the model id from Step 1>": { "effortLevel": "medium" }
+  },
   "cleanupPeriodDays": 365
 }
 ```
 
-Do not set a subagent model when I have one model only.
+Do not set a subagent model when I have one model only. If I have more than one model but no Sonnet, drop the Sonnet modelSettings entry, and set CLAUDE_CODE_SUBAGENT_MODEL to haiku when Haiku is in my list, otherwise leave env out.
+
+A saved per-model level outranks the top-level effortLevel, so after the merge check every existing modelSettings entry: the model that does the chores (Sonnet, or Haiku when I have no Sonnet) goes to medium, every other model goes to high, and with one model only everything goes to medium. Report each entry you changed.
 
 ## Step 7: my rules card
 
-Create claude-token-rules.md in this folder. Use the model table that matches MODELS I HAVE and drop the other one.
+Create claude-token-rules.md in this folder. Use the model table that matches MODELS I HAVE and drop the other one. In the multi-model table, make the model names match my list: the cheapest model I have in the first row (Haiku when there is no Sonnet), and the strongest I have in the third row. An existing copy is replaced; it is a generated card.
 
 ```
 # Claude token rules
@@ -165,7 +173,7 @@ End: /handover <stream>. Done when HANDOVER.md shows today's date.
 ## Step 8: report
 
 Finish with: a checklist of each file created with its full path; each settings key applied or skipped and why; the git status result; then these four lines for me to keep:
-1. Close this session. Open a new one here and ask "which memory files loaded, and what is my effort?" It should name CLAUDE.local.md and HANDOVER.md.
+1. Close this session. Open a new one here and ask "which memory files loaded, and what is my effort?" It should name the rules file from Step 2 and HANDOVER.md.
 2. For each old chat you still need: open it, type /handover <stream>, close it for good.
 3. Every morning: new session, "continue <stream>".
 4. At a natural stop past 35 percent, or when done: /handover <stream>, close.
