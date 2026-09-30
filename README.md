@@ -1,10 +1,40 @@
 # Claude Code handover workflow
 
-Short sessions, a handover file that every new session loads by itself, and effort defaults that stop the model from overthinking. Set up with one pasted prompt. Measured on five weeks of real usage before it existed.
+Stop paying to reload one giant chat. Work in short sessions, and let every new session start from a small handover file that Claude Code loads by itself.
 
-**Quick start:** open [SETUP-PROMPT.md](SETUP-PROMPT.md), fill the two lines at the top, paste the block into a new Claude Code session in your project folder, and follow the four lines it prints at the end. Nothing you already have is overwritten: existing files are appended to or left alone, and the report says which.
+## What you get
 
-## The problem, measured
+- **HANDOVER.md** in your project: where you stopped and the exact next step, one section per work stream, under 60 lines.
+- **CLAUDE.local.md** (personal, not committed) that imports it, so every new session knows where you were before you type anything.
+- **`/handover`**, a command that rewrites the handover file at the end of a session.
+- **Effort defaults** in your settings so the model stops overthinking small jobs.
+
+## Set up in 3 steps
+
+1. Open Claude Code in your project folder (terminal, desktop app, or VS Code) and start a new session.
+2. Open [SETUP-PROMPT.md](SETUP-PROMPT.md), click the copy button on the block, paste it as your message. No edits needed unless your model picker shows something other than Opus and Sonnet.
+3. Allow the file and command permissions it asks for. It ends with a checklist and four lines to keep.
+
+To check: open a new session and ask "which memory files loaded?". It should name CLAUDE.local.md and HANDOVER.md. Type `/` and `handover` is in the list.
+
+## Every day
+
+- Morning: new session, type `continue`. The first reply names your next step.
+- Same sitting: keep working. When the context bar passes 35%, finish the step you are on and type `/handover`. Hard stop at 50%.
+- Break longer than an hour, or next day: start a new session instead of reopening the old one, unless the bar is under 15%.
+- End: `/handover`, close the session.
+
+With several streams, say which one: `continue backend`, `/handover backend`.
+
+## Why it works, in five lines
+
+1. Claude Code sends your whole conversation with every request. Reading it from cache is cheap.
+2. After a break longer than an hour the cache is gone, and the first message re-writes the whole context at the expensive rate. On a 500K chat that is about $4 on Opus and $10 on Fable, per return.
+3. A fresh session costs about $0.55 to start, and the handover file is two thousand tokens.
+4. Long chats also get summarised when they fill up, which drops details, so the same files get read again and again.
+5. Durable facts already live in Claude's auto memory, ticket status in your tracker, code history in git. The handover file carries the one thing none of them hold: where you were mid-task.
+
+## The numbers behind it
 
 An audit of 19 sessions and 1,840 requests over five weeks (23 Aug to 30 Sep 2026), weighed at API list prices:
 
@@ -22,41 +52,7 @@ An audit of 19 sessions and 1,840 requests over five weeks (23 Aug to 30 Sep 202
 | Weight per prompt in the long-lived chats | $1.40 to $5.40 |
 | Weight per prompt in short single-task chats | $0.60 to $1.00 |
 
-The same documents were read about 90 times inside one chat, because each summary had dropped them. A long chat is not an archive. It is a window that forgets, and you pay to refill it.
-
-## The fix
-
-Three parts, all created by [SETUP-PROMPT.md](SETUP-PROMPT.md):
-
-1. **HANDOVER.md** in the project folder: one section per work stream with five fixed lines (current task, done recently, next step as the exact first prompt with a done-when, open decisions, files in play). Rewritten whole, under 60 lines.
-2. **CLAUDE.local.md** imports it with an `@HANDOVER.md` line. Claude Code loads the file at launch and expands the import, so every new session starts knowing where the last one stopped. Cost: about two thousand tokens.
-3. **`/handover`**, a user-level skill that rewrites the file, moves durable facts into memory, and tells you which model and effort to start the next session on. Only you can trigger it.
-
-Durable facts live in Claude's auto memory. Ticket status lives in your tracker. Code history lives in git. The handover file carries the one thing none of those hold: where you were mid-task.
-
-## Setup in one paste
-
-1. Open [SETUP-PROMPT.md](SETUP-PROMPT.md) and fill the two lines at the top: the models you have, and your work streams.
-2. Open a new Claude Code session in the project folder and paste the whole block.
-3. When it finishes, close that session, open a new one and ask "which memory files loaded, and what is my effort?" It should name CLAUDE.local.md and HANDOVER.md.
-4. For each old chat you still need: open it, type `/handover <stream>`, close it for good.
-
-The files it creates are also in [templates/](templates/) and [skills/handover/SKILL.md](skills/handover/SKILL.md) if you prefer to copy them by hand.
-
-Edge cases the prompt handles on its own: a folder that is not a git repository (the rules go in CLAUDE.md instead of CLAUDE.local.md), a repository that uses AGENTS.md (the new file imports it so it keeps loading), an existing CLAUDE.local.md or .gitignore (appended, never replaced), an existing HANDOVER.md (kept, with only the missing stream sections added), a CLAUDE.local.md that git already tracks (flagged, with the untrack command for you to run), a model list without Sonnet (Haiku does the chores and becomes the subagent model, and the rules card names your models), and settings that already hold other models or variables (merged at key level, with saved per-model efforts brought in line).
-
-Terminal users: run `/statusline` once so the context percentage is always visible; the desktop app shows it in the composer.
-
-## Daily loop
-
-- Morning: new session, model and effort from the table below, type `continue <stream>`. Done when the first reply names the next step.
-- Same sitting: hand over at the next natural stop once the context bar passes 35%. Hard stop at 50%.
-- Break longer than an hour: resume only if the bar is under 15%. Otherwise fresh session from the handover. Overnight: always fresh.
-- End: `/handover <stream>`, close, archive.
-
-## Why 35 and 50, not lower
-
-About 7% of the context bar is fixed overhead (tool definitions, connectors, memory index). Reading a big context each turn is cheap on current models. The expensive moment is a cold return: after a break longer than an hour the whole context is written to cache again. One cold return by size, at list prices:
+One cold return by context size, at list prices:
 
 | Context | Opus 5.5 | Fable 5.1 |
 | --- | --- | --- |
@@ -65,24 +61,28 @@ About 7% of the context bar is fixed overhead (tool definitions, connectors, mem
 | 50% (500K) | $4.00 | $10.00 |
 | Fresh session, about 70K | $0.55 | $1.40 |
 
-So size matters only when you come back cold. Work on in one sitting; never come back cold to a big chat.
-
 ## Model and effort
 
-Effort `high` is the documented default on most models and `medium` on Opus 5.5 and Sonnet 5.5. The docs warn that `max` "may show diminishing returns and is prone to overthinking". The audit ran 1,189 requests at max.
+Effort `high` is the documented default on most models and `medium` on Opus 5.5 and Sonnet 5.5. The docs warn that `max` "may show diminishing returns and is prone to overthinking".
 
 | Job | Model | Effort |
 | --- | --- | --- |
-| Summaries, ticket updates, commit messages, small edits, reading terminal output | Sonnet | medium |
+| Summaries, ticket updates, commit messages, small edits, reading terminal output | Sonnet (or your cheapest) | medium |
 | Writing code, bug fixes, anything that needs verification or has edge cases | Opus | high |
 | Whole-repo audit, security review, long autonomous build with a full brief | Fable if available, else Opus | high |
 | A hard problem where high already failed | same model | xhigh, one session |
 
-Pick model and effort once at session start. Never switch model mid-session: each switch re-caches the whole context.
+Pick model and effort once at session start. Never switch model mid-session: each switch re-caches the whole context. The setup writes these defaults into your settings; the rules card it creates in your project repeats this table for your own models.
+
+## What the setup handles on its own
+
+A folder that is not a git repository (rules go in CLAUDE.md), a repository that uses AGENTS.md (the new file imports it so it keeps loading), an existing CLAUDE.local.md or .gitignore (appended, never replaced), an existing HANDOVER.md (kept, only missing sections added), a CLAUDE.local.md that git already tracks (flagged, with the untrack command for you to run), a model list without Sonnet (Haiku does the chores and the rules card names your models), settings that already hold other models or variables (merged at key level, saved per-model efforts brought in line), a settings file that is not valid JSON (left alone and reported), and managed settings that override yours (reported and skipped).
+
+Terminal users: run `/statusline` once so the context percentage is always visible; the desktop app shows it in the composer.
 
 ## Audit your own usage
 
-Two Node scripts (Node 18 or newer, no dependencies) read the local transcripts in `~/.claude/projects` (nothing leaves your machine) and print the same tables as above:
+Two Node scripts (Node 18 or newer, no dependencies) read the local transcripts in `~/.claude/projects` and print the tables above for your own sessions. Nothing leaves your machine.
 
 ```bash
 node scripts/usage-report.mjs
@@ -92,23 +92,24 @@ node scripts/usage-report.mjs
 node scripts/cache-report.mjs
 ```
 
-Dollar figures are estimates at published API list prices, useful as the yardstick for how fast subscription limits fill. Pass `--root <path>` to point at another projects folder.
+Dollar figures are estimates at published API list prices, the yardstick for how fast subscription limits fill. Pass `--root <path>` to point at another projects folder.
 
 ## What was verified, and how
 
 Checked on 2026-10-01 with Claude Code 2.1.284 in the desktop app on Windows:
 
-- **Loading.** A fresh session process was asked, with tools forbidden, to quote marker lines. It quoted a marker from CLAUDE.local.md in the working folder and a second marker from a file pulled in by an `@` import inside it, and it listed a test skill placed under the project's `.claude/skills/` and another under `~/.claude/skills/`. So the three mechanisms this workflow relies on work as the docs describe.
-- **The setup prompt.** Agents ran it end to end in throwaway folders, and every file they produced was diffed against the templates in this repo. Scenarios covered: a git repo with "Opus + Sonnet" and two streams (CLAUDE.local.md and the skill byte-identical, rules card equal to the template minus the one-model table, one handover section per stream, personal files git-ignored, settings merged without touching existing keys); a folder that is not a git repository, has an AGENTS.md and "Opus only" (rules went to CLAUDE.md with `@AGENTS.md` as its first line, one-model table, single-model settings, a saved xhigh entry for another model brought down to medium); and a repo that already had a shared CLAUDE.md, a CLAUDE.local.md, a HANDOVER.md and a .gitignore, with "Opus + Haiku" (existing lines kept and the block appended, shared CLAUDE.md untouched, only missing .gitignore lines added, Haiku set as the subagent model, no Sonnet entry written).
+- **Loading.** A fresh session process was asked, with tools forbidden, to quote marker lines. It quoted a marker from CLAUDE.local.md in the working folder and a second marker from a file pulled in by an `@` import inside it, and it listed a test skill placed under the project's `.claude/skills/` and another under `~/.claude/skills/`.
+- **The setup prompt.** Agents ran it end to end in throwaway folders, and every file they produced was diffed against the templates in this repo: a git repo with two streams; a folder without git that has an AGENTS.md and one model; four variants of a repo that already had a shared CLAUDE.md, a CLAUDE.local.md, a HANDOVER.md and a .gitignore, on Opus + Haiku; the zero-edit defaults; and a settings file that is not valid JSON.
 - **The scripts** ran against five weeks of real transcripts and against an empty folder.
 
-Not covered: managed or organisation settings that override user settings (the prompt reports and skips those), and the `/handover` entry in the composer menu, which is hidden from the model on purpose (`disable-model-invocation: true`), so only you can see it. Type `/` in a new session to confirm it is there.
+Not covered: server-managed organisation settings (the prompt reports and skips what it can see on disk), and the `/handover` entry in the composer menu, which is hidden from the model on purpose (`disable-model-invocation: true`), so only you can see it.
 
 ## Files
 
 | Path | What it is |
 | --- | --- |
-| SETUP-PROMPT.md | The one-paste setup |
+| SETUP-PROMPT.md | The one-paste setup, with a copy button |
+| setup-prompt.txt | The same text, for select-all and copy |
 | templates/CLAUDE.local.md | Personal rules file with the handover import |
 | templates/HANDOVER.md | The handover file skeleton |
 | templates/claude-token-rules.md | Rules card |

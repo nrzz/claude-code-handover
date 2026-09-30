@@ -1,12 +1,3 @@
-# Setup prompt
-
-1. Open Claude Code in your project folder (terminal, the desktop app's Code tab, or the VS Code extension) and start a new session.
-2. Copy the whole block below (the copy button at its top right) and paste it as your message. The two lines at the top are defaults; change them only if they are wrong for you.
-3. When Claude asks permission to create files or run a command, allow it. It finishes with a checklist and four lines to keep.
-
-The same text is in [setup-prompt.txt](setup-prompt.txt) if you prefer select-all and copy.
-
-````
 MODELS I HAVE: Opus + Sonnet
 MY STREAMS: main
 
@@ -184,4 +175,3 @@ Finish with: a checklist of each file created with its full path; each settings 
 3. Every morning: new session, type "continue".
 4. At a natural stop past 35 percent, or when done: /handover, then close.
 (With more than one stream, add its name: "continue backend", "/handover backend".)
-````
