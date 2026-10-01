@@ -8,7 +8,7 @@ Stop paying to reload one giant chat. Work in short sessions, let every new sess
 - **DECISIONS.md**: a dated, append-only log. Claude writes a line the moment something is decided, found or tried and failed.
 - **CLAUDE.local.md** (personal, not committed) that imports the handover, so every new session knows where you were before you type anything.
 - **`/handover`**: rewrites the handover at the end of a session.
-- **`/recall <topic>`**: searches every past session of the project and tells you what was said, with dates.
+- **Automatic recall**: when you ask something, the few lines from earlier sessions that match your question are placed in front of Claude before it answers. Nothing to type. `/recall <topic>` remains for a deeper search with dates.
 - **A context guard**: warns at 35% of the context bar and will not let a turn end above it until the handover is written.
 - **Effort defaults** in your settings so the model stops overthinking small jobs.
 
@@ -24,13 +24,13 @@ To check: open a new session and ask "which memory files loaded?". It should nam
 
 - Morning: new session, type `continue`. The first reply names your next step.
 - While working: nothing to do. Decisions are logged as they happen.
-- Something from before is unclear: `/recall the topic`.
+- Something from before matters: it arrives by itself with your question. For a deeper search, `/recall the topic`.
 - When the guard warns (35%): finish the step you are on, type `/handover`, close the session. If you ignore the warning, the guard makes Claude write the handover before the turn can end.
 - Break longer than an hour, or next day: start a new session instead of reopening the old one, unless the bar is under 15%.
 
 With several streams, say which one: `continue backend`, `/handover backend`.
 
-## Nothing gets lost: four layers
+## Nothing gets lost: five layers
 
 A handover is a summary, and a summary alone would drop details. So it is not alone:
 
@@ -39,9 +39,10 @@ A handover is a summary, and a summary alone would drop details. So it is not al
 | DECISIONS.md | Every decision, constraint, finding and failed attempt has a dated line on disk | The moment it happens, so a crash or a compaction cannot lose it |
 | HANDOVER.md | The next session starts with the next step and the decisions still in force already in context | At every `/handover`, and forced by the guard above the limit |
 | Context guard | A handover exists before a big session ends its turn | At 35% (warning) and at every turn end above it (holds the turn open once) |
+| Automatic recall | What earlier sessions said about the thing you are asking is in front of Claude before it answers, including details a compaction dropped from the current session | On every prompt, only when something matches; a session start also shows the newest decisions |
 | `/recall` and the transcripts | Anything ever said in any session of the project can be found again, word for word | On demand; transcripts are kept for a year |
 
-What this does not promise: a new session does not hold the whole old conversation in its head. It holds the state and the decisions, and it can look up the rest in seconds. That is also more than a long chat keeps, because a long chat silently drops details each time it compacts.
+What this does not promise: a new session does not hold the whole old conversation in its head. It holds the state and the decisions, the relevant past lines arrive with each question, and it can look up the rest in seconds. That is also more than a long chat keeps, because a long chat silently drops details each time it compacts.
 
 ## Why it works, in five lines
 
@@ -93,9 +94,9 @@ Pick model and effort once at session start. Never switch model mid-session: eac
 
 ## What the setup handles on its own
 
-A folder that is not a git repository (rules go in CLAUDE.md), a repository that uses AGENTS.md (the new file imports it so it keeps loading), an existing CLAUDE.local.md or .gitignore (appended, never replaced), an existing HANDOVER.md or DECISIONS.md (kept), a personal file that git already tracks (flagged, with the untrack command for you to run), a model list without Sonnet (Haiku does the chores and the rules card names your models), settings that already hold other models, variables or hooks (merged at key level), a settings file that is not valid JSON (left alone and reported), managed settings that override yours (reported and skipped), and a machine without git or Node (the guard and `/recall` are skipped; everything else works).
+A folder that is not a git repository (rules go in CLAUDE.md), a repository that uses AGENTS.md (the new file imports it so it keeps loading), an existing CLAUDE.local.md or .gitignore (appended, never replaced), an existing HANDOVER.md or DECISIONS.md (kept), a personal file that git already tracks (flagged, with the untrack command for you to run), a model list without Sonnet (Haiku does the chores and the rules card names your models), settings that already hold other models, variables or hooks (merged at key level), a settings file that is not valid JSON (left alone and reported), managed settings that override yours (reported and skipped), and a machine without git or Node (the guard and automatic recall are skipped; everything else works).
 
-Tuning the guard: set `HANDOVER_CONTEXT_LIMIT` (tokens, default 350000), `HANDOVER_CONTEXT_WINDOW` (default 1000000) or `HANDOVER_STALE_MINUTES` (default 30) in the `env` block of your settings. The guard only acts in folders that have a HANDOVER.md.
+Tuning the guard: set `HANDOVER_CONTEXT_LIMIT` (tokens, default 350000), `HANDOVER_CONTEXT_WINDOW` (default 1000000) or `HANDOVER_STALE_MINUTES` (default 30) in the `env` block of your settings. Set `HANDOVER_AUTORECALL` to 0 to turn automatic recall off. The hook only acts in folders that have a HANDOVER.md. The recall index is a local file under `~/.claude/claude-code-handover-data/`.
 
 Terminal users: run `/statusline` once so the context percentage is always visible; the desktop app shows it in the composer.
 
@@ -123,6 +124,7 @@ Checked on 2026-10-01 with Claude Code 2.1.284 in the desktop app on Windows:
 
 - **Loading.** A fresh session process was asked, with tools forbidden, to quote marker lines. It quoted a marker from CLAUDE.local.md in the working folder and a second marker from a file pulled in by an `@` import inside it, and it listed a test skill placed under the project's `.claude/skills/` and another under `~/.claude/skills/`.
 - **The context guard, live.** Registered as a hook in a real session with the limit lowered for the test: the warning line arrived with the prompt, the turn was held open, Claude wrote the decisions log and the handover, and the turn then ended. Nine unit cases against real transcripts cover the silent paths (below the limit, fresh handover, no handover file, already continued once, unreadable input).
+- **Automatic recall.** Built on five weeks of real history: 1,673 indexed remarks, 0.6 seconds to build, 0.2 seconds per prompt. In sixteen test prompts, questions about things decided weeks earlier brought back the right lines (a measured number, a rule about an account, a carrier limitation), while everyday prompts such as "commit and push", "continue" or an unrelated coding question brought back nothing. Lines still in the current session are not repeated; lines a compaction dropped are.
 - **The setup prompt.** Agents ran it end to end in throwaway folders, and every file they produced was diffed against the templates in this repo: a git repo with two streams; a folder without git that has an AGENTS.md and one model; four variants of a repo that already had a shared CLAUDE.md, a CLAUDE.local.md, a HANDOVER.md and a .gitignore, on Opus + Haiku; the zero-edit defaults; a settings file that is not valid JSON; and the full version with the guard and `/recall` installed next to an existing hook.
 - **The scripts** ran against five weeks of real transcripts and against an empty folder. `/recall` found a topic discussed weeks earlier with its dates and session titles.
 
@@ -139,7 +141,8 @@ Not covered: server-managed organisation settings (the prompt reports and skips 
 | templates/claude-token-rules.md | Rules card |
 | templates/settings-multi-model.json, settings-single-model.json, hooks-settings.json | Settings keys to merge |
 | skills/handover/SKILL.md, skills/recall/SKILL.md | The two commands, installed under `~/.claude/skills/` |
-| scripts/context-guard.mjs | The hook behind the 35% warning and the held turn |
+| scripts/context-guard.mjs | The one hook: 35% warning, held turn, automatic recall, session-start digest |
+| scripts/memory-index.mjs | The index and search behind automatic recall |
 | scripts/recall.mjs | Search past sessions |
 | scripts/usage-report.mjs, cache-report.mjs | The audit |
 

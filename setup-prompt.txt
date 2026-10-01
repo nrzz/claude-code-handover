@@ -5,7 +5,7 @@ MY STREAMS: main
 
 Set up my token-saving workflow in this folder using the two lines above. Do all steps in this one session without asking me questions; where something is unclear, take the default I give and say so in the final report. Never destroy anything that already exists: where a file you are told to create is already there, append or skip as each step says, and report it. If a file you must read is not valid JSON, leave that file alone, skip the step that needed it, and tell me in the report.
 
-Background: long-lived chats waste usage two ways. Every return after a break longer than an hour re-writes the whole context to cache, and the same files get re-read many times after the chat is summarised. From now on: one task per session, a handover at a natural stop once the context bar passes 35 percent (hard stop at 50), a fresh session after any break longer than an hour unless the bar is under 15 percent, a handover file that every new session loads by itself, a dated decisions log written as things happen, a /recall command that searches past sessions, and a context guard that warns at 35 percent and will not let a turn end above it until the handover is written.
+Background: long-lived chats waste usage two ways. Every return after a break longer than an hour re-writes the whole context to cache, and the same files get re-read many times after the chat is summarised. From now on: one task per session, a handover at a natural stop once the context bar passes 35 percent (hard stop at 50), a fresh session after any break longer than an hour unless the bar is under 15 percent, a handover file that every new session loads by itself, a dated decisions log written as things happen, automatic recall of what earlier sessions said (with /recall for a deeper search), and a context guard that warns at 35 percent and will not let a turn end above it until the handover is written.
 
 ## Step 1: check the ground
 
@@ -34,7 +34,7 @@ Sessions are short: one task per session, then a fresh session. State between se
 
 - When I type /handover or say "handover", rewrite HANDOVER.md completely (current state only, under 120 lines), then update any memory file that gained a durable fact this session.
 - Offer a handover unprompted when the task is finished or the context bar passes 35 percent; insist at 50 percent.
-- When something from a past session is unclear, run /recall <topic> before guessing.
+- Lines marked "Automatic recall" arrive with my prompts when an earlier session said something relevant. Treat them as leads and check them before relying on them. For a deeper search run /recall <topic> before guessing.
 - Never re-read a large file whole when a section will do. Large logs, test output and long documents go to a subagent; only its answer comes back to this chat.
 - Do not switch model inside a session. If the job needs another model, hand over and start a new session.
 - Prefer command-line tools over MCP servers for the same job.
@@ -180,7 +180,7 @@ About 7 percent of the context bar is fixed overhead. Reading a big context each
 ## Nothing gets lost
 - Decisions, constraints, findings and failed attempts go into DECISIONS.md the moment they happen.
 - The handover carries the decisions still in force, not only the next step.
-- /recall <topic> searches every past session of this project, with dates.
+- What earlier sessions said about the thing you are asking arrives by itself with your prompt. /recall <topic> is the deeper search, with dates.
 - Old transcripts stay on disk for a year.
 
 ## Context rules
@@ -193,7 +193,7 @@ Morning: new session, model and effort per the table, type "continue". Done when
 End: /handover. Done when HANDOVER.md shows today's date.
 ```
 
-## Step 8: the context guard and /recall (needs git and Node)
+## Step 8: the context guard and automatic recall (needs git and Node)
 
 Run `git --version` and `node --version`. If either is missing, skip this step, say which one is missing, and go on; everything above works without it.
 
@@ -205,6 +205,9 @@ If both work:
 ```
 {
   "hooks": {
+    "SessionStart": [
+      { "hooks": [ { "type": "command", "command": "node", "args": ["<home>/.claude/claude-code-handover/scripts/context-guard.mjs"], "timeout": 10 } ] }
+    ],
     "UserPromptSubmit": [
       { "hooks": [ { "type": "command", "command": "node", "args": ["<home>/.claude/claude-code-handover/scripts/context-guard.mjs"], "timeout": 10 } ] }
     ],
@@ -215,13 +218,13 @@ If both work:
 }
 ```
 
-4. Prove the guard runs: from this folder, run `node <home>/.claude/claude-code-handover/scripts/recall.mjs setup` and show its first lines in the report.
+4. Build the recall index and prove it runs: from this folder, run `node <home>/.claude/claude-code-handover/scripts/memory-index.mjs --build` and then `node <home>/.claude/claude-code-handover/scripts/recall.mjs setup`, and show the first lines of both in the report.
 
 ## Step 9: report
 
-Finish with: a checklist of each file created with its full path; each settings key applied or skipped and why; the git status result; whether the guard and /recall were installed; then these four lines for me to keep:
+Finish with: a checklist of each file created with its full path; each settings key applied or skipped and why; the git status result; whether the guard and automatic recall were installed; then these four lines for me to keep:
 1. Close this session. Open a new one here and ask "which memory files loaded, and what is my effort?" It should name the rules file from Step 2 and HANDOVER.md.
 2. For each old chat you still need: open it, type /handover, close it for good.
-3. Every morning: new session, type "continue". When something from before is unclear, type /recall followed by the topic.
+3. Every morning: new session, type "continue". What earlier sessions said about your question arrives by itself; /recall followed by a topic is the deeper search.
 4. At a natural stop past 35 percent, or when done: /handover, then close.
 (With more than one stream, add its name: "continue backend", "/handover backend".)

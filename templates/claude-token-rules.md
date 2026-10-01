@@ -19,10 +19,16 @@ Never max as a default. Pick model and effort once at session start; never chang
 
 ## Session rules
 About 7 percent of the context bar is fixed overhead. Reading a big context each turn is cheap; a cold return after a break of more than an hour re-writes the whole context and is the expensive moment. On Opus about $1.20 at 15 percent, $2.80 at 35, $4.00 at 50, against $0.55 for a fresh session; on Fable two and a half times that.
-1. One task per session. Same sitting: hand over at the next natural stop once the bar passes 35 percent; hard stop at 50.
+1. One task per session. Same sitting: hand over at the next natural stop once the bar passes 35 percent; hard stop at 50. The context guard warns at 35 and holds the turn open above it until the handover is written.
 2. After a break of more than an hour: resume only if the bar is under 15 percent; otherwise start a fresh session from HANDOVER.md. Overnight: always fresh.
-3. Type /handover <stream> at the stop. Then close the session.
+3. Type /handover at the stop. Then close the session.
 4. Name sessions by stream and date, archive them after the handover.
+
+## Nothing gets lost
+- Decisions, constraints, findings and failed attempts go into DECISIONS.md the moment they happen.
+- The handover carries the decisions still in force, not only the next step.
+- What earlier sessions said about the thing you are asking arrives by itself with your prompt. /recall <topic> is the deeper search, with dates.
+- Old transcripts stay on disk for a year.
 
 ## Context rules
 - Ask for the section, not the whole file. Large logs, test output and long documents go to a subagent.
@@ -30,5 +36,5 @@ About 7 percent of the context bar is fixed overhead. Reading a big context each
 - Disable MCP servers you are not using in the session; prefer command-line tools.
 
 ## Daily loop
-Morning: new session, model and effort per the table, type "continue <stream>". Done when the first reply names the next step.
-End: /handover <stream>. Done when HANDOVER.md shows today's date.
+Morning: new session, model and effort per the table, type "continue". Done when the first reply names the next step.
+End: /handover. Done when HANDOVER.md shows today's date.
