@@ -82,8 +82,10 @@ async function main() {
       .replace(/^\s*Another Claude session sent a message:/i, " ")
       .replace(/This came from another Claude session[\s\S]*$/i, " ")
       .trim();
+    // In a long paste the question is at the start or the end; the bulk in between is not matched.
+    const asked = prompt.length > 1000 ? prompt.slice(0, 600) + " . " + prompt.slice(-300) : prompt;
     if (mem && prompt && !prompt.startsWith("/") && !prompt.startsWith("<") && !prompt.startsWith("[SYSTEM NOTIFICATION")) {
-      try { mem.updateIndex(cwd, { budgetMs: 800 }); out += mem.recallBlock(cwd, prompt, { sessionId: input.session_id || "" }); } catch { /* stay silent */ }
+      try { mem.updateIndex(cwd, { budgetMs: 800 }); out += mem.recallBlock(cwd, asked, { sessionId: input.session_id || "", remember: true }); } catch { /* stay silent */ }
     }
   } else if (event === "Stop") {
     if (mem) { try { mem.updateIndex(cwd, { budgetMs: 1500 }); } catch { /* stay silent */ } }

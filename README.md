@@ -39,7 +39,7 @@ A handover is a summary, and a summary alone would drop details. So it is not al
 | DECISIONS.md | Every decision, constraint, finding and failed attempt has a dated line on disk | The moment it happens, so a crash or a compaction cannot lose it |
 | HANDOVER.md | The next session starts with the next step and the decisions still in force already in context | At every `/handover`, and forced by the guard above the limit |
 | Context guard | A handover exists before a big session ends its turn | At 35% (warning) and at every turn end above it (holds the turn open once) |
-| Automatic recall | What earlier sessions said about the thing you are asking is in front of Claude before it answers, including details a compaction dropped from the current session | On every prompt, only when something matches; a session start also shows the newest decisions |
+| Automatic recall | What earlier sessions said about the thing you are asking is in front of Claude before it answers, including details a compaction dropped from the current session. A line is given to a session once, not on every prompt | On every prompt, only when the match is strong (rare shared words, a repeated phrase, or a ticket id); a session start also shows the newest decisions |
 | `/recall` and the transcripts | Anything ever said in any session of the project can be found again, word for word | On demand; transcripts are kept for a year |
 
 What this does not promise: a new session does not hold the whole old conversation in its head. It holds the state and the decisions, the relevant past lines arrive with each question, and it can look up the rest in seconds. That is also more than a long chat keeps, because a long chat silently drops details each time it compacts.
@@ -96,7 +96,7 @@ Pick model and effort once at session start. Never switch model mid-session: eac
 
 A folder that is not a git repository (rules go in CLAUDE.md), a repository that uses AGENTS.md (the new file imports it so it keeps loading), an existing CLAUDE.local.md or .gitignore (appended, never replaced), an existing HANDOVER.md or DECISIONS.md (kept), a personal file that git already tracks (flagged, with the untrack command for you to run), a model list without Sonnet (Haiku does the chores and the rules card names your models), settings that already hold other models, variables or hooks (merged at key level), a settings file that is not valid JSON (left alone and reported), managed settings that override yours (reported and skipped), and a machine without git or Node (the guard and automatic recall are skipped; everything else works).
 
-Tuning the guard: set `HANDOVER_CONTEXT_LIMIT` (tokens, default 350000), `HANDOVER_CONTEXT_WINDOW` (default 1000000) or `HANDOVER_STALE_MINUTES` (default 30) in the `env` block of your settings. Set `HANDOVER_AUTORECALL` to 0 to turn automatic recall off. The hook only acts in folders that have a HANDOVER.md. The recall index is a local file under `~/.claude/claude-code-handover-data/`.
+Tuning the guard: set `HANDOVER_CONTEXT_LIMIT` (tokens, default 350000), `HANDOVER_CONTEXT_WINDOW` (default 1000000) or `HANDOVER_STALE_MINUTES` (default 30) in the `env` block of your settings. Set `HANDOVER_AUTORECALL` to 0 to turn automatic recall off, `HANDOVER_RECALL_STRICTNESS` (default 4) higher for fewer and surer recalls or lower for more, and `HANDOVER_RECALL_WINDOW_MB` (default 12, about 35,000 remarks) to change how much of the newest history is searched on every prompt. Older remarks stay reachable through `/recall` and the decisions log. The hook only acts in folders that have a HANDOVER.md. The recall index is a local file under `~/.claude/claude-code-handover-data/`.
 
 Terminal users: run `/statusline` once so the context percentage is always visible; the desktop app shows it in the composer.
 
@@ -116,6 +116,12 @@ node scripts/cache-report.mjs
 node scripts/recall.mjs the topic
 ```
 
+```bash
+node scripts/selftest.mjs --replay
+```
+
+The last one is the stress test described below; with `--replay` it also measures recall on your own history and prints how many tokens it adds.
+
 Dollar figures are estimates at published API list prices, the yardstick for how fast subscription limits fill. Pass `--root <path>` to point at another projects folder, and `--all` to recall across every project.
 
 ## What was verified, and how
@@ -124,7 +130,9 @@ Checked on 2026-10-01 with Claude Code 2.1.284 in the desktop app on Windows:
 
 - **Loading.** A fresh session process was asked, with tools forbidden, to quote marker lines. It quoted a marker from CLAUDE.local.md in the working folder and a second marker from a file pulled in by an `@` import inside it, and it listed a test skill placed under the project's `.claude/skills/` and another under `~/.claude/skills/`.
 - **The context guard, live.** Registered as a hook in a real session with the limit lowered for the test: the warning line arrived with the prompt, the turn was held open, Claude wrote the decisions log and the handover, and the turn then ended. Nine unit cases against real transcripts cover the silent paths (below the limit, fresh handover, no handover file, already continued once, unreadable input).
-- **Automatic recall.** Built on five weeks of real history: 1,673 indexed remarks, 0.6 seconds to build, 0.2 seconds per prompt. In sixteen test prompts, questions about things decided weeks earlier brought back the right lines (a measured number, a rule about an account, a carrier limitation), while everyday prompts such as "commit and push", "continue" or an unrelated coding question brought back nothing. Lines still in the current session are not repeated; lines a compaction dropped are. Live, in a real session with tools forbidden: asked for a number that existed only in a chat from two weeks earlier, the session answered correctly, quoted the line and named the recall block as its source. The first live attempt returned nothing because the question sat inside a longer message; matching sentence by sentence fixed that, and the same session then answered.
+- **Automatic recall, stress test.** `scripts/selftest.mjs` builds nine synthetic histories, from 479 to 94,472 remarks, plants facts in them and asks about each fact from another session inside a long message with unrelated instructions around it. Result of the last run: 156 of 156 facts found; 56 of 56 found again inside their own session after a compaction; 0 of 100 repeated to a session that still held them; 2 false injections in 360 unrelated prompts; 5 ms per prompt on a small history, 265 ms on the largest; 0.5 seconds to index 94,472 remarks.
+- **Automatic recall, real history.** Replaying 345 real prompts from five weeks of work as if each were asked in a new session: recall added something on 57% of them, about 185 tokens when it did and 105 tokens per prompt on average, in 20 ms. Questions about things decided weeks earlier brought back the right lines (a measured number, a rule about an account, a carrier limitation, a ticket by its id), while "commit and push", "continue" or an unrelated coding question brought back nothing.
+- **Automatic recall, live.** In a real session with tools forbidden: asked for a number that existed only in a chat from two weeks earlier, the session answered correctly, quoted the line and named the recall block as its source. The first live attempt returned nothing because the question sat inside a longer message; matching sentence by sentence fixed that, and the same session then answered.
 - **The setup prompt.** Agents ran it end to end in throwaway folders, and every file they produced was diffed against the templates in this repo: a git repo with two streams; a folder without git that has an AGENTS.md and one model; four variants of a repo that already had a shared CLAUDE.md, a CLAUDE.local.md, a HANDOVER.md and a .gitignore, on Opus + Haiku; the zero-edit defaults; a settings file that is not valid JSON; and the full version, with the three hook events, the recall index and `/recall` installed next to an existing hook.
 - **The scripts** ran against five weeks of real transcripts and against an empty folder. `/recall` found a topic discussed weeks earlier with its dates and session titles.
 
@@ -143,6 +151,7 @@ Not covered: server-managed organisation settings (the prompt reports and skips 
 | skills/handover/SKILL.md, skills/recall/SKILL.md | The two commands, installed under `~/.claude/skills/` |
 | scripts/context-guard.mjs | The one hook: 35% warning, held turn, automatic recall, session-start digest |
 | scripts/memory-index.mjs | The index and search behind automatic recall |
+| scripts/selftest.mjs | Stress test: synthetic histories with planted facts, and a replay of your real prompts |
 | scripts/recall.mjs | Search past sessions |
 | scripts/usage-report.mjs, cache-report.mjs | The audit |
 
