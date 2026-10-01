@@ -82,10 +82,10 @@ export function updateIndex(cwd, { budgetMs = 2500 } = {}) {
   return { added: lines.length, complete };
 }
 
-export function terms(prompt) {
+export function terms(text) {
   const seen = new Set();
   const out = [];
-  for (const w of prompt.toLowerCase().split(/[^a-z0-9_]+/)) {
+  for (const w of text.toLowerCase().split(/[^a-z0-9_]+/)) {
     if (w.length < 3 || STOP.has(w) || seen.has(w) || /^\d+$/.test(w)) continue;
     seen.add(w);
     out.push(w);
@@ -93,10 +93,12 @@ export function terms(prompt) {
   return out.slice(0, 40);
 }
 
-// Returns up to `max` past snippets that share at least two informative terms with the prompt.
+// Returns up to `max` past snippets. The prompt is matched sentence by sentence, so a long message
+// with instructions around one real question still finds what was said about that question.
 export function search(cwd, prompt, { sessionId = "", max = 3 } = {}) {
-  const q = terms(prompt);
-  if (q.length < 2) return [];
+  const sentences = prompt.split(/[.?!\n;]+/).map((s) => terms(s)).filter((s) => s.length >= 2).slice(0, 16);
+  if (!sentences.length) return [];
+  const q = [...new Set(sentences.flat())].slice(0, 80);
   const out = dataDir(cwd);
   const state = loadState(out);
   const entries = [];
@@ -115,51 +117,57 @@ export function search(cwd, prompt, { sessionId = "", max = 3 } = {}) {
   }
   const N = entries.length;
   if (!N) return [];
-  const res = q.map((t) => new RegExp("\\b" + t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"));
+  const res = q.map((w) => new RegExp("\\b" + w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"));
   const df = new Array(q.length).fill(0);
   const hits = entries.map((e) => {
     const m = [];
     for (let i = 0; i < res.length; i++) if (res[i].test(e.x)) { m.push(i); df[i]++; }
     return m;
   });
-  // Rare words weigh more. A snippet must share at least two of the prompt's words, cover half of
-  // their combined weight, and reach a floor that two everyday words alone cannot reach.
-  const MIN_SCORE = 2 * Math.log(1 + N / Math.max(1, 0.05 * N)); // two words that each appear in 5% of everything said (6.1 once the history is large)
+  // Rare words weigh more. A snippet must share at least two words with one sentence of the prompt,
+  // cover half of that sentence, and reach a floor that two everyday words alone cannot reach.
+  const MIN_SCORE = 2 * Math.log(1 + N / Math.max(1, 0.05 * N)); // two words that each appear in 5% of everything said
   const idf = df.map((d) => (d > 0 ? Math.log(1 + N / d) : 0));
-  const informative = idf.map((v, i) => [v, i]).filter(([v]) => v > 0).sort((a, b) => b[0] - a[0]).slice(0, 10).map(([, i]) => i);
-  if (informative.length < 2) return [];
-  const useful = new Set(informative);
-  // Words of the prompt that were never said before count against a match (at most two of them),
-  // so "fix the typo in the readme" does not match every remark about a readme.
-  const unseen = Math.min(2, df.filter((d) => d === 0).length);
-  const total = informative.reduce((a, i) => a + idf[i], 0) + unseen * Math.log(1 + N);
+  const at = new Map(q.map((w, i) => [w, i]));
   const compactLine = state.compact[sessionId] || 0;
   const promptHead = prompt.trim().slice(0, 80);
-  const scored = [];
-  entries.forEach((e, k) => {
-    const m = hits[k].filter((i) => useful.has(i));
-    if (m.length < 2) return;
-    if (e.s === sessionId && !(compactLine && e.n < compactLine)) return; // still in this session's context
-    if (e.x.startsWith(promptHead)) return;
-    let score = m.reduce((a, i) => a + idf[i], 0);
-    // It must contain the prompt's rarest known word, or else cover most of the prompt.
-    const need = m.includes(informative[0]) ? 0.5 : 0.7;
-    if (score < MIN_SCORE || score / total < need) return;
-    if (e.dec) score *= 1.3; // a logged decision outranks a passing remark
-    scored.push({ e, score, m });
-  });
-  scored.sort((a, b) => b.score - a.score || (a.e.d < b.e.d ? 1 : -1));
+  const best = new Map();
+  for (const sentence of sentences) {
+    const idx = sentence.map((w) => at.get(w)).filter((i) => i !== undefined);
+    const informative = idx.filter((i) => idf[i] > 0).sort((x, y) => idf[y] - idf[x]).slice(0, 10);
+    if (informative.length < 2) continue;
+    const useful = new Set(informative);
+    // Words never said before count against a match (at most two), so "fix the typo in the readme"
+    // does not match every remark about a readme.
+    const unseen = Math.min(2, idx.filter((i) => df[i] === 0).length);
+    const total = informative.reduce((s, i) => s + idf[i], 0) + unseen * Math.log(1 + N);
+    entries.forEach((e, k) => {
+      const m = hits[k].filter((i) => useful.has(i));
+      if (m.length < 2) return;
+      if (e.s === sessionId && !(compactLine && e.n < compactLine)) return; // still in this session's context
+      if (e.x.startsWith(promptHead)) return;
+      let score = m.reduce((s, i) => s + idf[i], 0);
+      // It must contain the sentence's rarest known word, or else cover most of the sentence.
+      const need = m.includes(informative[0]) ? 0.5 : 0.7;
+      if (score < MIN_SCORE || score / total < need) return;
+      if (e.dec) score *= 1.3; // a logged decision outranks a passing remark
+      const prev = best.get(k);
+      if (!prev || prev.score < score) best.set(k, { score, m });
+    });
+  }
+  const scored = [...best].map(([k, v]) => ({ e: entries[k], score: v.score, m: v.m }));
+  scored.sort((x, y) => y.score - x.score || (x.e.d < y.e.d ? 1 : -1));
   const picked = [];
   const seen = new Set();
-  const best = scored.length ? scored[0].score : 0;
+  const top = scored.length ? scored[0].score : 0;
   for (const s of scored) {
-    if (s.score < 0.7 * best) break; // keep only snippets close to the best one
+    if (s.score < 0.7 * top) break; // keep only snippets close to the best one
     const msgKey = s.e.dec ? "" : `${s.e.s}:${s.e.n}`; // one snippet per message
     const textKey = s.e.x.slice(0, 100).replace(/\s+/g, " "); // forked sessions repeat the same text
     if ((msgKey && seen.has(msgKey)) || seen.has(textKey)) continue;
     if (msgKey) seen.add(msgKey);
     seen.add(textKey);
-    const rarest = s.m.reduce((a, i) => (idf[i] > idf[a] ? i : a), s.m[0]); // show the text around the rarest shared word
+    const rarest = s.m.reduce((p, i) => (idf[i] > idf[p] ? i : p), s.m[0]); // show the text around the rarest shared word
     const pos = Math.max(0, s.e.x.search(res[rarest]));
     const start = Math.max(0, pos - 110);
     const snip = (start > 0 ? "..." : "") + s.e.x.slice(start, start + 330).replace(/\s+/g, " ").trim() + (start + 330 < s.e.x.length ? "..." : "");
