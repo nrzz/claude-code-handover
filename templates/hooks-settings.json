@@ -1,0 +1,28 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["<home>/.claude/claude-code-handover/scripts/context-guard.mjs"],
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["<home>/.claude/claude-code-handover/scripts/context-guard.mjs"],
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
