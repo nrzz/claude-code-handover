@@ -75,8 +75,9 @@ async function main() {
     if (mem) { try { mem.updateIndex(cwd, { budgetMs: 1500 }); out += mem.digest(cwd); } catch { /* stay silent */ } }
   } else if (event === "UserPromptSubmit") {
     if (over) out += `Context guard: the context is at ${pct}% (${Math.round(ctx / 1000)}K tokens). Finish the current step, then run /handover and start a fresh session. HANDOVER.md was last written ${ageMin} minutes ago.\n`;
-    const prompt = String(input.prompt || "");
-    if (mem && prompt && !prompt.startsWith("/")) {
+    const prompt = String(input.prompt || "").trim();
+    // Slash commands and system-injected blocks (notifications) are not questions to recall for.
+    if (mem && prompt && !prompt.startsWith("/") && !prompt.startsWith("<") && !prompt.startsWith("[")) {
       try { mem.updateIndex(cwd, { budgetMs: 800 }); out += mem.recallBlock(cwd, prompt, { sessionId: input.session_id || "" }); } catch { /* stay silent */ }
     }
   } else if (event === "Stop") {
