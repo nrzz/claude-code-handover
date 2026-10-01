@@ -198,7 +198,8 @@ if (import.meta.url === pathToFileURL(process.argv[1] || "").href) {
   if (process.argv.includes("--build")) {
     let total = 0, r;
     do { r = updateIndex(cwd, { budgetMs: 4000 }); total += r.added; } while (!r.complete);
-    console.log(`Index for ${projectKey(cwd)}: ${total} new entries. Stored in ${dataDir(cwd)}`);
+    if (!fs.existsSync(transcriptsDir(cwd))) console.log(`No past sessions for ${projectKey(cwd)} yet. The index builds itself as sessions happen.`);
+    else console.log(`Index for ${projectKey(cwd)}: ${total} new entries. Stored in ${dataDir(cwd)}`);
   } else if (process.argv.includes("--ask")) {
     const qn = process.argv.slice(process.argv.indexOf("--ask") + 1).join(" ");
     updateIndex(cwd);
