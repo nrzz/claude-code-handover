@@ -1,5 +1,7 @@
 # Claude Code handover workflow
 
+[![test](https://github.com/nrzz/claude-code-handover/actions/workflows/test.yml/badge.svg)](https://github.com/nrzz/claude-code-handover/actions/workflows/test.yml) [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE) ![node >= 18](https://img.shields.io/badge/node-%3E%3D18-339933.svg) ![dependencies: none](https://img.shields.io/badge/dependencies-none-brightgreen.svg) [![part of the Claude Code toolkit](https://img.shields.io/badge/Claude%20Code-toolkit-d97757.svg)](https://github.com/nrzz/claude-code-toolkit)
+
 Stop paying to reload one giant chat. Work in short sessions, let every new session start from a small handover file that Claude Code loads by itself, and keep everything that was decided where a later session can find it.
 
 ## What you get
@@ -156,3 +158,24 @@ Not covered: server-managed organisation settings (the prompt reports and skips 
 | scripts/usage-report.mjs, cache-report.mjs | The audit |
 
 Sources for the documented behaviour: [Manage costs](https://code.claude.com/docs/en/costs), [Model configuration](https://code.claude.com/docs/en/model-config), [How Claude remembers your project](https://code.claude.com/docs/en/memory), [Skills](https://code.claude.com/docs/en/skills), [Hooks](https://code.claude.com/docs/en/hooks), [Pricing](https://platform.claude.com/docs/en/about-claude/pricing). All read on 2026-10-01.
+
+## Contributing
+
+Issues and pull requests are welcome: start with [CONTRIBUTING.md](CONTRIBUTING.md) and the [good first issues](https://github.com/nrzz/claude-code-handover/issues?q=is%3Aopen+label%3A%22good+first+issue%22). Questions go to [Discussions](https://github.com/nrzz/claude-code-handover/discussions); security reports go through [SECURITY.md](SECURITY.md).
+
+## Part of the Claude Code toolkit
+
+Small, dependency-free tools that make Claude Code cheaper, safer and easier to share, all in the [Claude Code toolkit](https://github.com/nrzz/claude-code-toolkit):
+
+- [claude-code-team-sync](https://github.com/nrzz/claude-code-team-sync): share sessions, notes and team context with coworkers
+- [claude-code-glow](https://github.com/nrzz/claude-code-glow): themes for the whole interface, a status line and a live HUD
+- [claude-code-guardrails](https://github.com/nrzz/claude-code-guardrails): safety presets that stop risky commands and edits
+- [claude-code-notify](https://github.com/nrzz/claude-code-notify): a ping when Claude needs you or finishes
+- [claude-md-doctor](https://github.com/nrzz/claude-md-doctor): what your CLAUDE.md costs every session, and how to slim it
+- [claude-code-starter-kits](https://github.com/nrzz/claude-code-starter-kits): a lean, safe .claude/ for your stack in one command
+- [claude-cost-guard](https://github.com/nrzz/claude-cost-guard): daily and weekly token budgets with zero-token warnings
+- [claude-session-replay](https://github.com/nrzz/claude-session-replay): search past sessions and export one as an HTML replay
+
+## License
+
+MIT
