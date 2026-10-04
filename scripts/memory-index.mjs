@@ -2,13 +2,16 @@
 // Used by the hook (automatic recall on every prompt) and usable from the command line:
 //   node memory-index.mjs --build            build or update the index for the current folder
 //   node memory-index.mjs --ask "question"   show what automatic recall would inject
-// The index lives in ~/.claude/claude-code-handover-data/<project>/ and never leaves the machine.
+// The index lives in <config folder>/claude-code-handover-data/<project>/ and never leaves the machine. The config
+// folder is $CLAUDE_CONFIG_DIR when that is set (Claude Code keeps its transcripts in <config folder>/projects), else
+// ~/.claude. HANDOVER_PROJECTS_DIR and HANDOVER_DATA_DIR override the two folders.
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 const HOME = os.homedir();
+const CONFIG = (process.env.CLAUDE_CONFIG_DIR || "").trim() ? path.resolve(process.env.CLAUDE_CONFIG_DIR.trim()) : path.join(HOME, ".claude");
 const CHUNK = 600;
 const WINDOW_BYTES = Number(process.env.HANDOVER_RECALL_WINDOW_MB || 12) * 1024 * 1024; // about 35,000 remarks
 const MAX_CHUNKS = 6;
@@ -16,8 +19,8 @@ const SKIP = ["<", "Stop hook feedback", "[Request interrupted", "Another Claude
 const STOP = new Set(("the a an and or but if then else for to of in on at by with from as is are was were be been being it this that these those i you he she we they me my your our their its not no yes do does did done have has had can could should would will shall may might must just also only very more most less least so such than too into over under about above after before again once here there when where why how what which who whom all any both each few other some own same don now please need want make made get got give gave use used using let lets like one two new old way thing things still even much many well back then them him her out off put see say said tell told know think going come came take took look looks good right okay yes yeah").split(" "));
 
 export const projectKey = (cwd) => cwd.replace(/[^A-Za-z0-9]/g, "-");
-export const transcriptsDir = (cwd) => path.join(process.env.HANDOVER_PROJECTS_DIR || path.join(HOME, ".claude", "projects"), projectKey(cwd));
-export const dataDir = (cwd) => path.join(process.env.HANDOVER_DATA_DIR || path.join(HOME, ".claude", "claude-code-handover-data"), projectKey(cwd));
+export const transcriptsDir = (cwd) => path.join(process.env.HANDOVER_PROJECTS_DIR || path.join(CONFIG, "projects"), projectKey(cwd));
+export const dataDir = (cwd) => path.join(process.env.HANDOVER_DATA_DIR || path.join(CONFIG, "claude-code-handover-data"), projectKey(cwd));
 
 function textOf(content) {
   if (typeof content === "string") return content;
@@ -41,6 +44,7 @@ export function updateIndex(cwd, { budgetMs = 2500 } = {}) {
   const started = Date.now();
   const lines = [];
   let complete = true;
+  let changed = false; // state.json is only rewritten when a transcript had something new
   for (const name of fs.readdirSync(dir)) {
     if (!name.endsWith(".jsonl")) continue;
     const file = path.join(dir, name);
@@ -77,9 +81,10 @@ export function updateIndex(cwd, { budgetMs = 2500 } = {}) {
     }
     st.offset += lastNl + 1;
     state.files[name] = st;
+    changed = true;
   }
   if (lines.length) fs.appendFileSync(path.join(out, "index.jsonl"), lines.join("\n") + "\n");
-  fs.writeFileSync(path.join(out, "state.json"), JSON.stringify(state));
+  if (changed) fs.writeFileSync(path.join(out, "state.json"), JSON.stringify(state));
   return { added: lines.length, complete };
 }
 

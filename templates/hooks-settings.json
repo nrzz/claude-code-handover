@@ -1,40 +1,13 @@
 {
   "hooks": {
     "SessionStart": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node",
-            "args": ["<home>/.claude/claude-code-handover/scripts/context-guard.mjs"],
-            "timeout": 10
-          }
-        ]
-      }
+      { "hooks": [ { "type": "command", "command": "node", "args": ["<home>/.claude/claude-code-handover/scripts/context-guard.mjs"], "timeout": 10 } ] }
     ],
     "UserPromptSubmit": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node",
-            "args": ["<home>/.claude/claude-code-handover/scripts/context-guard.mjs"],
-            "timeout": 10
-          }
-        ]
-      }
+      { "hooks": [ { "type": "command", "command": "node", "args": ["<home>/.claude/claude-code-handover/scripts/context-guard.mjs"], "timeout": 10 } ] }
     ],
     "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node",
-            "args": ["<home>/.claude/claude-code-handover/scripts/context-guard.mjs"],
-            "timeout": 10
-          }
-        ]
-      }
+      { "hooks": [ { "type": "command", "command": "node", "args": ["<home>/.claude/claude-code-handover/scripts/context-guard.mjs"], "timeout": 10 } ] }
     ]
   }
 }

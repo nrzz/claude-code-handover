@@ -1,13 +1,25 @@
 {
   "name": "claude-code-handover",
-  "version": "1.3.1",
+  "version": "1.4.0",
   "private": true,
   "description": "Short Claude Code sessions with a handover file every new session loads by itself, plus effort rules and a usage audit",
+  "bin": {
+    "claude-handover": "bin/claude-handover.mjs"
+  },
+  "files": [
+    "bin",
+    "src",
+    "scripts",
+    "skills",
+    "templates",
+    "setup-prompt.txt",
+    "SETUP-PROMPT.md"
+  ],
   "engines": {
     "node": ">=18"
   },
   "scripts": {
-    "test": "node scripts/selftest.mjs"
+    "test": "node --test && node scripts/selftest.mjs"
   },
   "repository": "github:nrzz/claude-code-handover",
   "license": "MIT",

@@ -1,5 +1,7 @@
 # Setup prompt
 
+This is the route where Claude does the setup, and spends tokens doing it. To get the same result with one command that uses no model, run `npx -y github:nrzz/claude-code-handover init` in your project folder; the [README](README.md#set-up-in-one-command) explains it.
+
 1. Open Claude Code in your project folder (terminal, the desktop app's Code tab, or the VS Code extension) and start a new session.
 2. Copy the whole block below (the copy button at its top right) and paste it as your message. The two lines at the top are defaults; change them only if they are wrong for you.
 3. When Claude asks permission to create files or run a command, allow it. It finishes with a checklist and four lines to keep.

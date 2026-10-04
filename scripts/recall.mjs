@@ -12,7 +12,9 @@ const flag = (name) => { const i = args.indexOf(name); return i > -1 ? args.spli
 const opt = (name, dflt) => { const i = args.indexOf(name); if (i === -1) return dflt; const v = args[i + 1]; args.splice(i, 2); return v; };
 const ALL = flag("--all");
 const LIMIT = Number(opt("--limit", 40));
-const ROOT = opt("--root", process.env.HANDOVER_PROJECTS_DIR || path.join(os.homedir(), ".claude", "projects"));
+// Claude Code keeps its transcripts in <config folder>/projects: $CLAUDE_CONFIG_DIR when that is set, else ~/.claude.
+const CONFIG = (process.env.CLAUDE_CONFIG_DIR || "").trim() ? path.resolve(process.env.CLAUDE_CONFIG_DIR.trim()) : path.join(os.homedir(), ".claude");
+const ROOT = opt("--root", process.env.HANDOVER_PROJECTS_DIR || path.join(CONFIG, "projects"));
 const words = args.join(" ").trim().toLowerCase().split(/\s+/).filter(Boolean);
 if (!words.length) { console.log("Usage: node recall.mjs <word or words> [--all] [--limit N]"); process.exit(0); }
 

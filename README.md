@@ -14,13 +14,69 @@ Stop paying to reload one giant chat. Work in short sessions, let every new sess
 - **A context guard**: warns at 35% of the context bar and will not let a turn end above it until the handover is written.
 - **Effort defaults** in your settings so the model stops overthinking small jobs.
 
-## Set up in 3 steps
+## What it costs in tokens
+
+The point is to spend fewer tokens, so here is what the workflow itself adds:
+
+| Part | Tokens | |
+| --- | --- | --- |
+| `CLAUDE.local.md`, your personal rules | about 450 per session | Loaded at the start of every session in the project |
+| `HANDOVER.md` | about 170 when new | Loaded at the start of every session; the rewrite rules keep it under 120 lines. It is what replaces reloading a long chat |
+| The latest decisions, at session start | up to about 450, usually less | The 8 newest dated lines of `DECISIONS.md`, from the SessionStart hook |
+| Automatic recall | 0 for most prompts, about 110 to 200 when an earlier session matches strongly | Measured by `scripts/selftest.mjs` (the `tokens/hit` column). `HANDOVER_AUTORECALL=0` turns it off |
+| The context guard | 0 below 35% of the context, one line per prompt above it | At the end of a turn above 35% with a stale handover, one paragraph asking for the handover |
+| `/recall` in Claude's skill list | about 60 per session | Its description lets Claude search when you ask about an earlier decision; the search itself runs outside the model |
+| `/handover` | 0 until you run it | User-only (`disable-model-invocation`), so it is not in the list Claude Code gives the model |
+| `DECISIONS.md` and `claude-token-rules.md` | 0 | Read only when a task needs them |
+| `init`, `status`, `uninstall` and the audit scripts | 0 | Plain Node, no model |
+
+Against that, one cold return to a chat at 35% of a 1M context re-writes about 350K tokens (about $2.80 on Opus at list prices), and a fresh session that starts from the handover is about 70K.
+
+## Set up in one command
+
+In your project folder, in a terminal (Node 18 or newer):
+
+```bash
+npx -y github:nrzz/claude-code-handover init
+```
+
+It does what the setup prompt below tells Claude to do, with the same file contents and the same never-destroy rules, but without a model: it costs no tokens, asks no questions and takes a few seconds. It ends with a plain report of every file it created, appended to or left alone, every settings key it set or skipped and why, what git says about your four personal files, and the four lines to keep. Run it a second time and it changes nothing and says so.
+
+| Option | What it does |
+| --- | --- |
+| `--models "Opus + Sonnet"` | The models your picker shows. Default `Opus + Sonnet`; `"Opus only"`, `"Fable + Opus + Sonnet"` and `"sonnet,haiku"` work too. It decides the effort defaults, the subagent model and the rules card. |
+| `--streams "main"` | Your work streams, one handover section each. Default `main`; for example `"backend, frontend"`. |
+| `--dir <project>` | The project folder. Default: the current folder. |
+| `--dry-run` | Say what would change and write nothing. |
+| `--no-hooks` | Skip the context guard, automatic recall and `/recall`. |
+
+Exit codes, for scripts: `0` when everything is in place, also when it already was; `1` when a step could not be done (one line on stderr says which, and the report says the rest); `2` when the command line was not understood.
+
+What it writes:
+
+- **In the project folder:** `CLAUDE.local.md` (your personal rules; `CLAUDE.md` instead in a folder that is not a git repository and has no CLAUDE.md), `HANDOVER.md`, `DECISIONS.md` and `claude-token-rules.md`, and the four file names in `.gitignore` in a git repository. An existing `CLAUDE.md` or `AGENTS.md` is never modified. An existing `CLAUDE.local.md`, `HANDOVER.md` or `.gitignore` gets only what is missing, and an existing `DECISIONS.md` is left as it is. A personal file that git already tracks is reported with the `git rm --cached` command for you to run; the index is never changed.
+- **In `~/.claude`, or `$CLAUDE_CONFIG_DIR` when you set it:** the `/handover` and `/recall` skills, a copy of the guard and recall scripts in `claude-code-handover/` (so the hooks never depend on npx's cache; a git clone that an older setup left there is updated with `git pull --ff-only`, or copied over when git cannot), and in `settings.json` the effort defaults and the three hooks, merged key by key after a backup named `settings.json.bak-YYYYMMDD`. A key that your organisation's managed settings already set is skipped and reported, a `cleanupPeriodDays` longer than 365 is kept, and a `settings.json` that is not valid JSON (comments and trailing commas count) is left alone and reported. The copy of the scripts is rewritten to match this version each time you run `init`, so keep your own files out of that folder.
+
+Where the prompt leaves a choice, the command takes the safe side. A `/handover` or `/recall` skill that differs from ours is kept next to the new one as `SKILL.md.bak-<date>`. A file that is not UTF-8 text (UTF-16, for example) is left alone and reported, because rewriting it would corrupt it. The `settings.json` backup is made only when the run changes the file, so a second run leaves no backup.
+
+To undo it, and to see what is installed:
+
+```bash
+npx -y github:nrzz/claude-code-handover uninstall
+npx -y github:nrzz/claude-code-handover status
+```
+
+`uninstall` backs up `settings.json`, then removes only what `init` added at user level: our three hook entries, the two skills (when they are still the copies `init` wrote) and the copy of the scripts (a file of yours in that folder stays). A git checkout of the scripts that an older setup made is removed only with `--purge`. Your project files and the effort settings stay, and it says so; `--dry-run` shows what would go.
+
+## Or let Claude set it up
+
+If you would rather watch Claude do it, or want to adapt a step, paste the setup prompt instead. Claude does the work, so it spends tokens; the command above spends none.
 
 1. Open Claude Code in your project folder (terminal, desktop app, or VS Code) and start a new session.
 2. Open [SETUP-PROMPT.md](SETUP-PROMPT.md), click the copy button on the block, paste it as your message. No edits needed unless your model picker shows something other than Opus and Sonnet.
 3. Allow the file and command permissions it asks for. It ends with a checklist and four lines to keep.
 
-To check: open a new session and ask "which memory files loaded?". It should name CLAUDE.local.md and HANDOVER.md. Type `/` and `handover` and `recall` are in the list.
+To check either way: open a new session and ask "which memory files loaded?". It should name CLAUDE.local.md and HANDOVER.md. Type `/` and `handover` and `recall` are in the list.
 
 ## Every day
 
@@ -96,9 +152,9 @@ Pick model and effort once at session start. Never switch model mid-session: eac
 
 ## What the setup handles on its own
 
-A folder that is not a git repository (rules go in CLAUDE.md), a repository that uses AGENTS.md (the new file imports it so it keeps loading), an existing CLAUDE.local.md or .gitignore (appended, never replaced), an existing HANDOVER.md or DECISIONS.md (kept), a personal file that git already tracks (flagged, with the untrack command for you to run), a model list without Sonnet (Haiku does the chores and the rules card names your models), settings that already hold other models, variables or hooks (merged at key level), a settings file that is not valid JSON (left alone and reported), managed settings that override yours (reported and skipped), and a machine without git or Node (the guard and automatic recall are skipped; everything else works).
+A folder that is not a git repository (rules go in CLAUDE.md), a repository that uses AGENTS.md (the new file imports it so it keeps loading), an existing CLAUDE.local.md or .gitignore (appended, never replaced), an existing HANDOVER.md or DECISIONS.md (kept), a personal file that git already tracks (flagged, with the untrack command for you to run), a model list without Sonnet (Haiku does the chores and the rules card names your models), settings that already hold other models, variables or hooks (merged at key level), a settings file that is not valid JSON (left alone and reported), managed settings that override yours (reported and skipped), and a machine without git (the one command copies the scripts instead of cloning them, so the guard and automatic recall still install; only the git checks are skipped). With the pasted prompt, a machine without git or Node skips the guard and automatic recall, and everything else works.
 
-Tuning the guard: set `HANDOVER_CONTEXT_LIMIT` (tokens, default 350000), `HANDOVER_CONTEXT_WINDOW` (default 1000000) or `HANDOVER_STALE_MINUTES` (default 30) in the `env` block of your settings. Set `HANDOVER_AUTORECALL` to 0 to turn automatic recall off, `HANDOVER_RECALL_STRICTNESS` (default 4) higher for fewer and surer recalls or lower for more, and `HANDOVER_RECALL_WINDOW_MB` (default 12, about 35,000 remarks) to change how much of the newest history is searched on every prompt. Older remarks stay reachable through `/recall` and the decisions log. The hook only acts in folders that have a HANDOVER.md. The recall index is a local file under `~/.claude/claude-code-handover-data/`.
+Tuning the guard: set `HANDOVER_CONTEXT_LIMIT` (tokens, default 350000), `HANDOVER_CONTEXT_WINDOW` (default 1000000) or `HANDOVER_STALE_MINUTES` (default 30) in the `env` block of your settings. Set `HANDOVER_AUTORECALL` to 0 to turn automatic recall off, `HANDOVER_RECALL_STRICTNESS` (default 4) higher for fewer and surer recalls or lower for more, and `HANDOVER_RECALL_WINDOW_MB` (default 12, about 35,000 remarks) to change how much of the newest history is searched on every prompt. Older remarks stay reachable through `/recall` and the decisions log. The hook only acts in folders that have a HANDOVER.md. The recall index is a local file under `~/.claude/claude-code-handover-data/`, and recall reads the transcripts in `~/.claude/projects`; if you moved Claude Code's config folder with `CLAUDE_CONFIG_DIR`, both follow it. `HANDOVER_PROJECTS_DIR` and `HANDOVER_DATA_DIR` set either folder directly.
 
 Terminal users: run `/statusline` once so the context percentage is always visible; the desktop app shows it in the composer.
 
@@ -137,13 +193,17 @@ Checked on 2026-10-01 with Claude Code 2.1.284 in the desktop app on Windows:
 - **Automatic recall, live.** In a real session with tools forbidden: asked for a number that existed only in a chat from two weeks earlier, the session answered correctly, quoted the line and named the recall block as its source. The first live attempt returned nothing because the question sat inside a longer message; matching sentence by sentence fixed that, and the same session then answered.
 - **The setup prompt.** Agents ran it end to end in throwaway folders, and every file they produced was diffed against the templates in this repo: a git repo with two streams; a folder without git that has an AGENTS.md and one model; four variants of a repo that already had a shared CLAUDE.md, a CLAUDE.local.md, a HANDOVER.md and a .gitignore, on Opus + Haiku; the zero-edit defaults; a settings file that is not valid JSON; and the full version, with the three hook events, the recall index and `/recall` installed next to an existing hook.
 - **The scripts** ran against five weeks of real transcripts and against an empty folder. `/recall` found a topic discussed weeks earlier with its dates and session titles.
+- **The one-command setup**, checked on 2026-10-04 on Windows with Node 24: `npm test` runs more than 250 tests of it, all passing (and then the recall stress test above), each in a throwaway home, config folder and project; nothing outside a temporary folder is read or written, and no real transcript is read. They hold the installer to the prompt: every code block of `setup-prompt.txt` equals its template, and `init` writes the files those blocks describe for a git project, a folder without git, an existing CLAUDE.md, CLAUDE.local.md, AGENTS.md, HANDOVER.md, DECISIONS.md and .gitignore, a personal file that git already tracks, every model mix, a settings file that is not valid JSON, a managed setting and hooks that were already there. A second run changes nothing (every file's bytes and modification time are compared), `--dry-run` writes nothing, and `uninstall` after `init` leaves the settings as they were except for the effort keys. The copied `context-guard.mjs` is run with a SessionStart, UserPromptSubmit and Stop event, as the hooks run it, and exits 0. Run by hand through `npx` from a local git repository, which is how a GitHub address is fetched, `init`, a second `init` ("nothing to do"), `status` and `uninstall` behaved the same.
 
-Not covered: server-managed organisation settings (the prompt reports and skips what it can see on disk), and the `/handover` entry in the composer menu, which is hidden from the model on purpose (`disable-model-invocation: true`), so only you can see it.
+Not covered: organisation settings that are not files, such as server-managed settings, MDM profiles and the Windows registry (`init` reads `managed-settings.json` and the `managed-settings.d` folder where the Claude Code docs say they are, and skips the keys they set; the prompt reports and skips what it can see on disk), a live Claude Code session started after `init` (it writes the same files as the prompt, whose live checks are above), `npx` fetching the package from github.com itself, and the `/handover` entry in the composer menu, which is hidden from the model on purpose (`disable-model-invocation: true`), so only you can see it.
 
 ## Files
 
 | Path | What it is |
 | --- | --- |
+| bin/claude-handover.mjs | The entry point of the one command: `init`, `uninstall`, `status` |
+| src/ | The installer: one module per step, the settings merge, the report |
+| test/ | The installer's tests (`node --test`), including a check that every code block of the setup prompt equals its template |
 | SETUP-PROMPT.md | The one-paste setup, with a copy button |
 | setup-prompt.txt | The same text, for select-all and copy |
 | templates/CLAUDE.local.md | Personal rules file with the handover import |
