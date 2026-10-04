@@ -78,8 +78,11 @@ test("the index's state file is not rewritten when no transcript has anything ne
   const bytes = read(state);
   const second = script(box, "memory-index.mjs", ["--build"]);
   assert.match(second.stdout, /: 0 new entries\./);
-  assert.equal(fs.statSync(state).mtimeMs, past.getTime(), "state.json was not written");
-  assert.equal(fs.statSync(index).mtimeMs, past.getTime(), "index.jsonl was not written");
+  // Still an hour old, so not written. (Not compared exactly: file systems store nanoseconds, and the
+  // milliseconds read back can differ from the ones set by a fraction.)
+  const old = (f) => Math.abs(fs.statSync(f).mtimeMs - past.getTime()) < 1000;
+  assert.ok(old(state), "state.json was not written");
+  assert.ok(old(index), "index.jsonl was not written");
   assert.equal(read(state), bytes);
   // a new line in the transcript is picked up, and then the state does change
   const transcript = path.join(box.projects, key(box), "11111111-aaaa-4aaa-8aaa-000000000001.jsonl");
