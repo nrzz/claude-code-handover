@@ -66,7 +66,7 @@ test("the vendored context guard stays silent in a folder that does not use the 
   assert.equal(r.stdout, "");
 }));
 
-test("the vendored guard holds a turn open above the limit until the handover is written, as before", withBox((box) => {
+test("the vendored guard asks, at the end of a turn above the limit, for a handover that is older than 30 minutes", withBox((box) => {
   runInit(box);
   const transcript = path.join(box.root, "session.jsonl");
   const line = JSON.stringify({ type: "assistant", message: { usage: { input_tokens: 10, cache_read_input_tokens: 400000, output_tokens: 5 } } });

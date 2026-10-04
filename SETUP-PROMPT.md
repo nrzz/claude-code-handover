@@ -16,7 +16,7 @@ MY STREAMS: main
 
 Set up my token-saving workflow in this folder using the two lines above. Do all steps in this one session without asking me questions; where something is unclear, take the default I give and say so in the final report. Never destroy anything that already exists: where a file you are told to create is already there, append or skip as each step says, and report it. If a file you must read is not valid JSON, leave that file alone, skip the step that needed it, and tell me in the report.
 
-Background: long-lived chats waste usage two ways. Every return after a break longer than an hour re-writes the whole context to cache, and the same files get re-read many times after the chat is summarised. From now on: one task per session, a handover at a natural stop once the context bar passes 35 percent (hard stop at 50), a fresh session after any break longer than an hour unless the bar is under 15 percent, a handover file that every new session loads by itself, a dated decisions log written as things happen, automatic recall of what earlier sessions said (with /recall for a deeper search), and a context guard that warns at 35 percent and will not let a turn end above it until the handover is written.
+Background: long-lived chats waste usage two ways. Every return after a break longer than an hour re-writes the whole context to cache, and the same files get re-read many times after the chat is summarised. From now on: one task per session, a handover at a natural stop once the context bar passes 35 percent (hard stop at 50), a fresh session after any break longer than an hour unless the bar is under 15 percent, a handover file that every new session loads by itself, a dated decisions log written as things happen, automatic recall of what earlier sessions said (with /recall for a deeper search), and a context guard that warns from 35 percent of the context window (HANDOVER_CONTEXT_WINDOW, 1M tokens by default; set it for a 200K model) and, at the end of a turn above that, asks once for the handover if HANDOVER.md is older than 30 minutes.
 
 ## Step 1: check the ground
 
@@ -126,7 +126,7 @@ If this folder is a git repository, make sure .gitignore lists CLAUDE.local.md, 
 
 ## Step 6: settings, chosen from MODELS I HAVE
 
-Back up the user settings file as settings.json.bak-<today>, then merge the matching block into it at key level: every existing key stays, other models' entries inside modelSettings stay, other variables inside env stay; only the keys in the block are set. Print the result and confirm it parses as JSON.
+Back up the user settings file as settings.json.bak-YYYYMMDD (today's date), then merge the matching block into it at key level: every existing key stays, other models' entries inside modelSettings stay, other variables inside env stay; only the keys in the block are set. If cleanupPeriodDays is already above 365, keep it. Print the result and confirm it parses as JSON.
 
 If I have more than one model:
 
@@ -159,7 +159,7 @@ A saved per-model level outranks the top-level effortLevel, so after the merge c
 
 ## Step 7: my rules card
 
-Create claude-token-rules.md in this folder. Use the model table that matches MODELS I HAVE and drop the other one. In the multi-model table, make the model names match my list: the cheapest model I have in the first row (Haiku when there is no Sonnet), and the strongest I have in the third row. An existing copy is replaced; it is a generated card.
+Create claude-token-rules.md in this folder. Use the model table that matches MODELS I HAVE and drop the other one. In the multi-model table, make the model names match my list: the first row names the model that does the chores (Sonnet, else Haiku, else the cheapest I have), the second row names Opus (else the strongest I have that is not Fable), and the third row names the strongest I have. An existing copy is replaced; it is a generated card.
 
 ```
 # Claude token rules
@@ -183,7 +183,7 @@ Never max as a default. Pick model and effort once at session start; never chang
 
 ## Session rules
 About 7 percent of the context bar is fixed overhead. Reading a big context each turn is cheap; a cold return after a break of more than an hour re-writes the whole context and is the expensive moment. On Opus about $1.20 at 15 percent, $2.80 at 35, $4.00 at 50, against $0.55 for a fresh session; on Fable two and a half times that.
-1. One task per session. Same sitting: hand over at the next natural stop once the bar passes 35 percent; hard stop at 50. The context guard warns at 35 and holds the turn open above it until the handover is written.
+1. One task per session. Same sitting: hand over at the next natural stop once the bar passes 35 percent; hard stop at 50. The context guard warns from 35 percent of the context window (HANDOVER_CONTEXT_WINDOW, 1M tokens by default; set it for a 200K model) and, at the end of a turn above that, asks once for the handover if HANDOVER.md is older than 30 minutes.
 2. After a break of more than an hour: resume only if the bar is under 15 percent; otherwise start a fresh session from HANDOVER.md. Overnight: always fresh.
 3. Type /handover at the stop. Then close the session.
 4. Name sessions by stream and date, archive them after the handover.
@@ -209,7 +209,7 @@ End: /handover. Done when HANDOVER.md shows today's date.
 Run `git --version` and `node --version`. If either is missing, skip this step, say which one is missing, and go on; everything above works without it.
 
 If both work:
-1. Clone https://github.com/nrzz/claude-code-handover into ~/.claude/claude-code-handover. If that folder already exists, run `git pull` inside it instead.
+1. Clone https://github.com/nrzz/claude-code-handover into ~/.claude/claude-code-handover. If that folder already exists and has a .git folder, run `git pull` inside it instead. If it exists without one (the one-command setup makes a plain copy), leave it as it is.
 2. Copy ~/.claude/claude-code-handover/skills/recall/SKILL.md to ~/.claude/skills/recall/SKILL.md (replace an existing copy).
 3. Merge this block into the user settings file at key level, keeping any hooks already there. Replace <home> with my absolute home folder path from Step 1, using forward slashes.
 

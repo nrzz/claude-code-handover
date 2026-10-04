@@ -19,7 +19,7 @@ Never max as a default. Pick model and effort once at session start; never chang
 
 ## Session rules
 About 7 percent of the context bar is fixed overhead. Reading a big context each turn is cheap; a cold return after a break of more than an hour re-writes the whole context and is the expensive moment. On Opus about $1.20 at 15 percent, $2.80 at 35, $4.00 at 50, against $0.55 for a fresh session; on Fable two and a half times that.
-1. One task per session. Same sitting: hand over at the next natural stop once the bar passes 35 percent; hard stop at 50. The context guard warns at 35 and holds the turn open above it until the handover is written.
+1. One task per session. Same sitting: hand over at the next natural stop once the bar passes 35 percent; hard stop at 50. The context guard warns from 35 percent of the context window (HANDOVER_CONTEXT_WINDOW, 1M tokens by default; set it for a 200K model) and, at the end of a turn above that, asks once for the handover if HANDOVER.md is older than 30 minutes.
 2. After a break of more than an hour: resume only if the bar is under 15 percent; otherwise start a fresh session from HANDOVER.md. Overnight: always fresh.
 3. Type /handover at the stop. Then close the session.
 4. Name sessions by stream and date, archive them after the handover.

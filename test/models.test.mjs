@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { FAMILIES, choresFamily, effortForModel, familyOf, modelsLabel, parseModels, parseStreams, ruleRows } from "../src/models.mjs";
 import { rulesCard, settingsBlock } from "../src/templates.mjs";
 import { UsageError } from "../src/util.mjs";
-import { expectedCard } from "./helpers.mjs";
+import { combinationOf, expectedCard, modelCombinations } from "./helpers.mjs";
 
 const keys = (text) => parseModels(text).keys;
 
@@ -72,6 +72,11 @@ const MIXES = [
   ["Opus + Haiku", { effortLevel: "high", env: { CLAUDE_CODE_SUBAGENT_MODEL: "haiku" }, cleanupPeriodDays: 365 }],
   ["Fable + Haiku", { effortLevel: "high", env: { CLAUDE_CODE_SUBAGENT_MODEL: "haiku" }, cleanupPeriodDays: 365 }],
   ["Opus + Fable", { effortLevel: "high", cleanupPeriodDays: 365 }],
+  ["Sonnet + Fable", { effortLevel: "high", modelSettings: SONNET, env: { CLAUDE_CODE_SUBAGENT_MODEL: "sonnet" }, cleanupPeriodDays: 365 }],
+  ["Fable + Opus + Haiku", { effortLevel: "high", env: { CLAUDE_CODE_SUBAGENT_MODEL: "haiku" }, cleanupPeriodDays: 365 }],
+  ["Opus + Sonnet + Haiku", { effortLevel: "high", modelSettings: SONNET, env: { CLAUDE_CODE_SUBAGENT_MODEL: "sonnet" }, cleanupPeriodDays: 365 }],
+  ["Fable + Sonnet + Haiku", { effortLevel: "high", modelSettings: SONNET, env: { CLAUDE_CODE_SUBAGENT_MODEL: "sonnet" }, cleanupPeriodDays: 365 }],
+  ["Fable + Opus + Sonnet + Haiku", { effortLevel: "high", modelSettings: SONNET, env: { CLAUDE_CODE_SUBAGENT_MODEL: "sonnet" }, cleanupPeriodDays: 365 }],
   ["Opus only", { effortLevel: "medium", modelSettings: { "claude-opus-5-5": { effortLevel: "medium" } }, cleanupPeriodDays: 365 }],
   ["Sonnet only", { effortLevel: "medium", modelSettings: SONNET, cleanupPeriodDays: 365 }],
   ["Fable only", { effortLevel: "medium", modelSettings: { "claude-fable-5-1": { effortLevel: "medium" } }, cleanupPeriodDays: 365 }],
@@ -80,6 +85,10 @@ const MIXES = [
 for (const [text, expected] of MIXES) {
   test(`settings block for "${text}"`, () => assert.deepEqual(settingsBlock(keys(text)), expected));
 }
+
+test("the lists above cover every combination of the four models, 15 in all", () => {
+  assert.deepEqual([...new Set(MIXES.map(([text]) => combinationOf(keys(text))))].sort(), modelCombinations());
+});
 
 test("no subagent model for one model; haiku only when there is Haiku but no Sonnet", () => {
   for (const [text, block] of MIXES) {
@@ -123,13 +132,23 @@ const CARDS = [
   ["Sonnet + Haiku", { first: "Sonnet", second: "Sonnet", third: "Sonnet" }],
   ["Fable + Sonnet", { first: "Sonnet", second: "Sonnet", third: "Fable" }],
   ["Opus + Fable", { first: "Opus", second: "Opus", third: "Fable" }],
+  ["Fable + Haiku", { first: "Haiku", second: "Haiku", third: "Fable" }],
+  ["Opus + Sonnet + Haiku", { first: "Sonnet", second: "Opus", third: "Opus" }],
+  ["Fable + Sonnet + Haiku", { first: "Sonnet", second: "Sonnet", third: "Fable" }],
+  ["Fable + Opus + Sonnet + Haiku", { first: "Sonnet", second: "Opus", third: "Fable" }],
 ];
 for (const [text, names] of CARDS) {
-  test(`rules card for "${text}": cheapest first, strongest third`, () => {
+  // The prompt's rule: the first row is the model that does the chores (Sonnet, else Haiku, else the cheapest listed), the
+  // second row is Opus (else the strongest listed that is not Fable), the third row is the strongest listed.
+  test(`rules card for "${text}": chores model first, Opus or the strongest but Fable second, strongest third`, () => {
     assert.deepEqual(ruleRows(keys(text)), { chores: names.first, workhorse: names.second, strongest: names.third });
     assert.equal(rulesCard(keys(text)), expectedCard({ multi: true, ...names }));
   });
 }
+
+test("the cards above cover every combination of more than one model, 11 in all", () => {
+  assert.deepEqual([...new Set(CARDS.map(([text]) => combinationOf(keys(text))))].sort(), modelCombinations().filter((c) => c.includes("+")));
+});
 
 test("rules card for one model is the one-model table of the prompt, whichever model it is", () => {
   for (const m of ["Opus", "Sonnet", "Fable", "Haiku"]) assert.equal(rulesCard(keys(`${m} only`)), expectedCard({ multi: false }));

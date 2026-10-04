@@ -2,7 +2,7 @@
 // Prints the matching things you and Claude said, with date and session title, newest first.
 // Usage: node recall.mjs <word or words> [--all] [--limit N] [--root <projects folder>]
 //   --all    search every project on this machine, not only the current folder's
-// Nothing leaves your machine. Transcripts live in ~/.claude/projects.
+// Nothing leaves your machine. Transcripts live in ~/.claude/projects ($CLAUDE_CONFIG_DIR/projects when that is set).
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";

@@ -2,20 +2,24 @@
 //   SessionStart      shows the newest lines of DECISIONS.md and refreshes the index
 //   UserPromptSubmit  warns when the context is above the limit, and adds automatic recall:
 //                     the few things from earlier sessions that match what was just asked
-//   Stop              refuses to end a turn above the limit until HANDOVER.md has been rewritten,
-//                     and indexes what was said in this turn
+//   Stop              at the end of a turn above the limit, asks once for HANDOVER.md to be rewritten, unless it was
+//                     written in the last HANDOVER_STALE_MINUTES; and indexes what was said in this turn
 // It only acts in folders that have a HANDOVER.md. It never throws and never blocks on an error.
 //
 // Settings (environment variables, all optional):
-//   HANDOVER_CONTEXT_LIMIT   tokens that trigger the guard, default 350000 (35% of a 1M window)
-//   HANDOVER_CONTEXT_WINDOW  window size used for the percentage, default 1000000
-//   HANDOVER_STALE_MINUTES   how old HANDOVER.md may be before the Stop hook insists, default 30
+//   HANDOVER_CONTEXT_WINDOW  the model's context window in tokens, default 1000000. The default limit and the
+//                            percentage shown follow it: set 200000 for a 200K model
+//   HANDOVER_CONTEXT_LIMIT   tokens that trigger the guard, default 35% of HANDOVER_CONTEXT_WINDOW (350000 with the
+//                            default window). When it is set, it wins
+//   HANDOVER_STALE_MINUTES   how old HANDOVER.md must be before the Stop hook asks for a rewrite, default 30
 //   HANDOVER_AUTORECALL      set to 0 to turn automatic recall off
 import fs from "node:fs";
 import path from "node:path";
 
-const LIMIT = Number(process.env.HANDOVER_CONTEXT_LIMIT || 350000);
-const WINDOW = Number(process.env.HANDOVER_CONTEXT_WINDOW || 1000000);
+// A window that is not a positive number counts as unset, so a typo cannot turn the default limit into 0 or NaN.
+const windowSetting = Number(process.env.HANDOVER_CONTEXT_WINDOW);
+const WINDOW = Number.isFinite(windowSetting) && windowSetting > 0 ? windowSetting : 1000000;
+const LIMIT = Number(process.env.HANDOVER_CONTEXT_LIMIT || Math.round((WINDOW * 35) / 100));
 const STALE_MIN = Number(process.env.HANDOVER_STALE_MINUTES || 30);
 const AUTORECALL = process.env.HANDOVER_AUTORECALL !== "0";
 

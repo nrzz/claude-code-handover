@@ -4,7 +4,7 @@
 import path from "node:path";
 import { appendBlock, appendLines, bomOf, eolOf, exists, isFile, peekText, readText, samePath, stripBom, toLF } from "./util.mjs";
 import { findGitRoot, trackedAmong, untrackedAmong } from "./git.mjs";
-import { modelsLabel } from "./models.mjs";
+import { FAMILIES, modelsLabel } from "./models.mjs";
 import {
   PERSONAL_FILES, PERSONAL_RULES_HEADING, decisionsFile, handoverFile, handoverParts, personalRules, rulesCard, streamSection,
 } from "./templates.mjs";
@@ -165,12 +165,24 @@ export function gitignoreStep(c, info) {
 
 // ---- Step 7: the rules card -----------------------------------------------------------------
 
-/** claude-token-rules.md with the table for the person's models. It is a generated card, so an existing copy is replaced. */
+/** Every card this version writes: one per combination of the four families (their order does not change the card). */
+function generatedCards() {
+  const families = Object.keys(FAMILIES);
+  const cards = new Set();
+  for (let mask = 1; mask < 1 << families.length; mask++) cards.add(rulesCard(families.filter((_, i) => mask & (1 << i))));
+  return cards;
+}
+
+/**
+ * claude-token-rules.md with the table for the person's models. It is a generated card, so an existing copy is replaced.
+ * A copy that is not one of the cards this version writes (it may hold the person's edits, and the card is gitignored)
+ * is first kept next to it as claude-token-rules.md.bak-<date>, the naming of the skill backups.
+ */
 export function rulesCardStep(c) {
   const { R, w } = c;
   const file = path.join(c.dir, "claude-token-rules.md");
   const card = rulesCard(c.keys);
-  const text = peekText(file); // a generated card is replaced whatever it holds, so it is only compared
+  const text = peekText(file); // only compared: a copy that is not one of ours is kept as a backup, then replaced
   const label = `the table for ${c.keys.length === 1 ? "one model" : modelsLabel(c.keys)}`;
   if (text === null) {
     w.write(file, card);
@@ -178,6 +190,8 @@ export function rulesCardStep(c) {
   } else if (toLF(text) === card) {
     R.file("unchanged", file, `${label}; it is already in place`);
   } else {
+    // The card for another model list (the person changed --models) is ours, so it is replaced without a backup.
+    if (!generatedCards().has(toLF(text))) R.file("backup", w.backup(file, c.now), "your previous copy of the card, which differed");
     w.write(file, card);
     R.file("replaced", file, `${label}; it is a generated card, so a copy that differed is replaced`);
   }

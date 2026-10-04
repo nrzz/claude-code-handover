@@ -93,7 +93,10 @@ export function init(opts = {}, io = consoleIO) {
     R.guard.unshift(
       `${c.dryRun ? (R.changed ? "Would be installed" : "Installed (already in place)") : "Installed"}: the context guard and automatic recall.`,
       `  Three hooks (SessionStart, UserPromptSubmit, Stop) run the scripts in ${vendorDir(c.cfg)}.`,
-      "  The guard warns at 35 percent of the context and holds a turn open above it until the handover is written.",
+      // Indented lines are not wrapped by the report, so this sentence is broken by hand to stay within 100 columns.
+      "  The guard warns from 35 percent of the context window (HANDOVER_CONTEXT_WINDOW, 1M tokens",
+      "  by default; set it for a 200K model) and, at the end of a turn above that, asks once for the",
+      "  handover if HANDOVER.md is older than 30 minutes.",
     );
   } else if (!vendored) {
     R.guard.unshift("Not installed: the scripts could not be put in place (see Problems).");

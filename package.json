@@ -1,6 +1,6 @@
 {
   "name": "claude-code-handover",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "private": true,
   "description": "Short Claude Code sessions with a handover file every new session loads by itself, plus effort rules and a usage audit",
   "bin": {

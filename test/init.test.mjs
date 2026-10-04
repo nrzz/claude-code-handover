@@ -6,9 +6,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import {
-  BLOCK, EMOJI, HAS_GIT, ROOT, TODAY, commitAll, envWithoutGit, exists, expectedCard, flat, git, gitInit, names, projectKey, promptBlocks, read,
-  readJson, runInit, runStatus, snapshot, withBox, write, writeTranscript,
+  BLOCK, EMOJI, HAS_GIT, ROOT, TODAY, combinationOf, commitAll, envWithoutGit, exists, expectedCard, flat, git, gitInit, modelCombinations, names, projectKey,
+  promptBlocks, read, readJson, runInit, runStatus, snapshot, withBox, write, writeTranscript,
 } from "./helpers.mjs";
+import { parseModels } from "../src/models.mjs";
 
 const CHANGING = new Set(["created", "appended", "updated", "replaced", "backup", "copied", "removed"]);
 const changedFiles = (r) => r.report.files.filter((f) => CHANGING.has(f.action) && f.action !== "backup").map((f) => f.file);
@@ -55,6 +56,9 @@ gitTest("the report says, in plain words, what was done, what git says and what 
   assert.match(text, /Git repository yes/);
   assert.match(text, /git status shows none of the four files as untracked/);
   assert.match(text, /Installed: the context guard and automatic recall/);
+  assert.match(text, /The guard warns from 35 percent of the context window \(HANDOVER_CONTEXT_WINDOW, 1M tokens by default; set it for a 200K model\) and, at the end of a turn above that, asks once for the handover if HANDOVER\.md is older than 30 minutes\./);
+  assert.ok(!/holds a turn open|until the handover is written/.test(text), "the report does not say the guard holds the turn open");
+  for (const l of r.text.split("\n").filter((x) => /guard warns from|by default; set it for a 200K|handover if HANDOVER\.md is older/.test(x))) assert.ok(l.length <= 100, `a line of the guard description is wider than 100 columns: ${l}`);
   assert.match(text, /node scripts\/memory-index\.mjs --build: No past sessions for /);
   assert.match(text, /node scripts\/recall\.mjs setup:/);
   assert.match(text, /Keep these four lines 1\. Open a new Claude Code session in .* and ask "which memory files loaded, and what is my effort\?" It should name CLAUDE\.local\.md and HANDOVER\.md\./);
@@ -393,6 +397,65 @@ test("the card uses Haiku where there is no Sonnet", withBox((box) => {
   assert.equal(read(box.p("claude-token-rules.md")), expectedCard({ multi: true, first: "Haiku", third: "Opus" }));
 }));
 
+test("a rules card that differs is kept as claude-token-rules.md.bak-YYYYMMDD before it is replaced, and the report says so", withBox((box) => {
+  const mine = "# my own rules card\nI edited this on purpose.\n";
+  write(box.p("claude-token-rules.md"), mine);
+  const r = runInit(box, { models: "Fable + Opus + Sonnet" });
+  const card = expectedCard({ multi: true, third: "Fable" });
+  assert.equal(read(box.p("claude-token-rules.md")), card);
+  assert.deepEqual(backups(box.project, "claude-token-rules.md.bak-"), ["claude-token-rules.md.bak-20261004"]);
+  assert.equal(read(box.p("claude-token-rules.md.bak-20261004")), mine, "the backup is the card as it was");
+  assert.equal(record(r, box.p("claude-token-rules.md.bak-20261004")).action, "backup");
+  assert.equal(record(r, box.p("claude-token-rules.md")).action, "replaced");
+  assert.match(flat(r.text), /backed up .*claude-token-rules\.md\.bak-20261004 your previous copy of the card, which differed/);
+
+  // The same card again: nothing differs, so nothing is backed up and nothing is written.
+  const before = snapshot(box.root);
+  const again = runInit(box, { models: "Fable + Opus + Sonnet" });
+  assert.equal(again.changed, false, again.text);
+  assert.deepEqual(snapshot(box.root), before, "no second backup, no rewrite");
+  assert.equal(record(again, box.p("claude-token-rules.md")).action, "unchanged");
+
+  // Edited again, then a run for other models: the first backup is never overwritten, the next one gets the time in its name.
+  const mineAgain = `${card}\nOne more rule of my own.\n`;
+  write(box.p("claude-token-rules.md"), mineAgain);
+  runInit(box, { models: "Opus only" });
+  assert.deepEqual(backups(box.project, "claude-token-rules.md.bak-").sort(), ["claude-token-rules.md.bak-20261004", "claude-token-rules.md.bak-20261004-120000"]);
+  assert.equal(read(box.p("claude-token-rules.md.bak-20261004")), mine);
+  assert.equal(read(box.p("claude-token-rules.md.bak-20261004-120000")), mineAgain, "the card as it was before this run");
+  assert.equal(read(box.p("claude-token-rules.md")), expectedCard({ multi: false }));
+}));
+
+test("a rules card that init wrote for other models is replaced without a backup when the model list changes", withBox((box) => {
+  runInit(box, { models: "Opus + Sonnet" });
+  for (const models of ["Opus only", "Fable + Opus + Sonnet", "Sonnet + Haiku", "Opus + Sonnet"]) {
+    const r = runInit(box, { models });
+    assert.equal(record(r, box.p("claude-token-rules.md")).action, "replaced", `${models}:\n${r.text}`);
+    assert.ok(!r.report.files.some((f) => f.action === "backup" && /claude-token-rules/.test(f.file)), `${models}: no backup of a card init wrote`);
+  }
+  assert.deepEqual(backups(box.project, "claude-token-rules.md.bak-"), []);
+  assert.equal(read(box.p("claude-token-rules.md")), expectedCard({ multi: true }));
+}));
+
+test("a rules card with Windows line endings is the same card and is left alone, without a backup", withBox((box) => {
+  runInit(box);
+  const card = read(box.p("claude-token-rules.md"));
+  fs.writeFileSync(box.p("claude-token-rules.md"), card.replace(/\n/g, "\r\n"));
+  const r = runInit(box);
+  assert.equal(r.changed, false, r.text);
+  assert.deepEqual(backups(box.project, "claude-token-rules.md.bak-"), []);
+  assert.equal(read(box.p("claude-token-rules.md")), card.replace(/\n/g, "\r\n"));
+}));
+
+test("--dry-run says it would back up a rules card that differs, and writes nothing", withBox((box) => {
+  write(box.p("claude-token-rules.md"), "mine\n");
+  const before = snapshot(box.root);
+  const r = runInit(box, { dryRun: true });
+  assert.deepEqual(snapshot(box.root), before);
+  assert.match(r.text, /would back up\s+\S*claude-token-rules\.md\.bak-20261004\n/);
+  assert.match(r.text, /would replace\s+\S*claude-token-rules\.md\n/);
+}));
+
 // ---------------------------------------------------------------------------------------------
 // settings.json
 // ---------------------------------------------------------------------------------------------
@@ -402,11 +465,21 @@ const MIX_SETTINGS = [
   ["Fable + Opus + Sonnet", { effortLevel: "high", modelSettings: { "claude-sonnet-5-5": { effortLevel: "medium" } }, env: { CLAUDE_CODE_SUBAGENT_MODEL: "sonnet" } }],
   ["Opus + Haiku", { effortLevel: "high", env: { CLAUDE_CODE_SUBAGENT_MODEL: "haiku" } }],
   ["Opus + Fable", { effortLevel: "high" }],
+  ["Sonnet + Fable", { effortLevel: "high", modelSettings: { "claude-sonnet-5-5": { effortLevel: "medium" } }, env: { CLAUDE_CODE_SUBAGENT_MODEL: "sonnet" } }],
+  ["Sonnet + Haiku", { effortLevel: "high", modelSettings: { "claude-sonnet-5-5": { effortLevel: "medium" } }, env: { CLAUDE_CODE_SUBAGENT_MODEL: "sonnet" } }],
+  ["Fable + Haiku", { effortLevel: "high", env: { CLAUDE_CODE_SUBAGENT_MODEL: "haiku" } }],
+  ["Fable + Opus + Haiku", { effortLevel: "high", env: { CLAUDE_CODE_SUBAGENT_MODEL: "haiku" } }],
+  ["Opus + Sonnet + Haiku", { effortLevel: "high", modelSettings: { "claude-sonnet-5-5": { effortLevel: "medium" } }, env: { CLAUDE_CODE_SUBAGENT_MODEL: "sonnet" } }],
+  ["Fable + Sonnet + Haiku", { effortLevel: "high", modelSettings: { "claude-sonnet-5-5": { effortLevel: "medium" } }, env: { CLAUDE_CODE_SUBAGENT_MODEL: "sonnet" } }],
+  ["Fable + Opus + Sonnet + Haiku", { effortLevel: "high", modelSettings: { "claude-sonnet-5-5": { effortLevel: "medium" } }, env: { CLAUDE_CODE_SUBAGENT_MODEL: "sonnet" } }],
   ["Opus only", { effortLevel: "medium", modelSettings: { "claude-opus-5-5": { effortLevel: "medium" } } }],
   ["Sonnet only", { effortLevel: "medium", modelSettings: { "claude-sonnet-5-5": { effortLevel: "medium" } } }],
   ["Fable only", { effortLevel: "medium", modelSettings: { "claude-fable-5-1": { effortLevel: "medium" } } }],
   ["Haiku only", { effortLevel: "medium", modelSettings: { "claude-haiku-4-5-20251001": { effortLevel: "medium" } } }],
 ];
+test("the model lists below cover every combination of Opus, Sonnet, Fable and Haiku (15), as the README says", () => {
+  assert.deepEqual([...new Set(MIX_SETTINGS.map(([text]) => combinationOf(parseModels(text).keys)))].sort(), modelCombinations());
+});
 for (const [models, expected] of MIX_SETTINGS) {
   test(`settings.json for "${models}" holds the block of the prompt for that list, and the hooks`, withBox((box) => {
     const r = runInit(box, { models });
@@ -884,6 +957,7 @@ test("an existing DECISIONS.md is kept even when it is not UTF-8 text, and an ol
   assert.ok(fs.readFileSync(box.p("DECISIONS.md")).equals(utf16));
   assert.equal(record(r, box.p("DECISIONS.md")).action, "kept");
   assert.equal(read(box.p("claude-token-rules.md")), expectedCard({ multi: true }));
+  assert.ok(fs.readFileSync(box.p("claude-token-rules.md.bak-20261004")).equals(Buffer.from([0xff, 0xfe, 0x00, 0x01])), "the old card is kept byte for byte, whatever it held");
 }));
 
 test("a hooks value of the wrong kind is reported, the guard is not claimed as installed, and the rest is done", withBox((box) => {

@@ -58,7 +58,8 @@ body:
       label: How did you install it?
       options:
         - npx from GitHub
-        - Claude Code plugin marketplace
+        - The pasted setup prompt
+        - The toolkit setup page (npx -y github:nrzz/claude-code-toolkit)
         - git clone
         - Other
   - type: textarea

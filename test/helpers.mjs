@@ -218,6 +218,18 @@ export function expectedCard({ multi, third = "Opus", first = "Sonnet", second =
   return [...head, ...section, ...tail].join("\n") + "\n";
 }
 
+// ---- model lists ----------------------------------------------------------------------------
+
+/** Every non-empty combination of the four model families as a sorted "a+b" key, 15 in all. */
+export function modelCombinations() {
+  const families = ["fable", "haiku", "opus", "sonnet"];
+  const out = [];
+  for (let mask = 1; mask < 1 << families.length; mask++) out.push(families.filter((_, i) => mask & (1 << i)).join("+"));
+  return out.sort();
+}
+/** The combination a list of family keys names, in the same form: ["sonnet", "fable"] is "fable+sonnet". */
+export const combinationOf = (keys) => [...keys].sort().join("+");
+
 // ---- transcripts ----------------------------------------------------------------------------
 
 /** Claude Code's folder name for a working directory: every non-alphanumeric character becomes "-". */

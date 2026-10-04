@@ -1,12 +1,14 @@
 // Cache report from local Claude Code transcripts: cold returns, model switches, cost per prompt, biggest reads.
-// Reads ~/.claude/projects/**/*.jsonl. Nothing leaves your machine.
+// Reads <config folder>/projects/**/*.jsonl: ~/.claude, or $CLAUDE_CONFIG_DIR when that is set. Nothing leaves your machine.
 // Usage: node scripts/cache-report.mjs [--root <projects folder>]
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
 const argRoot = process.argv.indexOf("--root");
-const ROOT = argRoot > -1 ? process.argv[argRoot + 1] : path.join(os.homedir(), ".claude", "projects");
+// The folders recall reads: --root, else HANDOVER_PROJECTS_DIR, else <config folder>/projects.
+const CONFIG = (process.env.CLAUDE_CONFIG_DIR || "").trim() ? path.resolve(process.env.CLAUDE_CONFIG_DIR.trim()) : path.join(os.homedir(), ".claude");
+const ROOT = argRoot > -1 ? process.argv[argRoot + 1] : process.env.HANDOVER_PROJECTS_DIR || path.join(CONFIG, "projects");
 
 const PRICE = {
   "claude-fable-5-1": [10, 50, 0.25, 12.5, 20],
@@ -84,7 +86,7 @@ const events = []; const causes = {}; const causeCost = {}; let totalCwCost = 0;
 for (const [sid, arr] of bySession) for (let i = 0; i < arr.length; i++) {
   const r = arr[i]; totalCwCost += r.cwCost; if (r.cw < 50e3) continue;
   const prev = arr[i - 1]; const gapMin = prev ? (new Date(r.ts) - new Date(prev.ts)) / 60000 : Infinity;
-  let cause = !prev ? "first request" : prev.model !== r.model ? "model switch" : gapMin >= 55 ? "cold return after >1h" : r.cw / Math.max(1, r.ctx) > 0.5 ? "other invalidation" : "normal growth";
+  let cause = !prev ? "first request" : prev.model !== r.model ? "model switch" : gapMin >= 55 ? "cold return (55+ min)" : r.cw / Math.max(1, r.ctx) > 0.5 ? "other invalidation" : "normal growth";
   causes[cause] = (causes[cause] || 0) + 1; causeCost[cause] = (causeCost[cause] || 0) + r.cwCost;
   events.push({ sid, ts: r.ts, cw: r.cw, ctx: r.ctx, gapMin, cause, cost: r.cwCost, model: r.model });
 }
@@ -94,7 +96,7 @@ console.log("\nlargest 15:");
 for (const e of events.sort((a, b) => b.cw - a.cw).slice(0, 15))
   console.log(`${e.ts.slice(0, 16)} ${(titles.get(e.sid) || e.sid.slice(0, 8)).slice(0, 30).padEnd(30)} | wrote ${fmt(e.cw).padStart(8)} of ${fmt(e.ctx).padStart(8)} | gap ${isFinite(e.gapMin) ? fmt(e.gapMin).padStart(6) + " min" : "     first"} | ${e.cause.padEnd(22)} | ${money(e.cost)} | ${e.model.replace("claude-", "")}`);
 
-console.log("\n=== COLD RETURNS PER SESSION (>1h gap with >100K context) ===");
+console.log("\n=== COLD RETURNS PER SESSION (gap of 55 minutes or more, with >100K context) ===");
 for (const [sid, arr] of bySession) {
   let returns = 0, cost = 0; const days = new Set();
   for (let i = 1; i < arr.length; i++) { days.add(arr[i].ts.slice(0, 10)); const g = (new Date(arr[i].ts) - new Date(arr[i - 1].ts)) / 60000; if (g >= 55 && arr[i].ctx > 100e3) { returns++; cost += arr[i].cwCost; } }

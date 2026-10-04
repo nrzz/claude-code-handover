@@ -1,12 +1,14 @@
 // Usage report from local Claude Code transcripts: tokens and estimated weight per session, model, effort and tool.
-// Reads ~/.claude/projects/**/*.jsonl. Nothing leaves your machine.
+// Reads <config folder>/projects/**/*.jsonl: ~/.claude, or $CLAUDE_CONFIG_DIR when that is set. Nothing leaves your machine.
 // Usage: node scripts/usage-report.mjs [--root <projects folder>]
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
 const argRoot = process.argv.indexOf("--root");
-const ROOT = argRoot > -1 ? process.argv[argRoot + 1] : path.join(os.homedir(), ".claude", "projects");
+// The folders recall reads: --root, else HANDOVER_PROJECTS_DIR, else <config folder>/projects.
+const CONFIG = (process.env.CLAUDE_CONFIG_DIR || "").trim() ? path.resolve(process.env.CLAUDE_CONFIG_DIR.trim()) : path.join(os.homedir(), ".claude");
+const ROOT = argRoot > -1 ? process.argv[argRoot + 1] : process.env.HANDOVER_PROJECTS_DIR || path.join(CONFIG, "projects");
 
 // $/MTok at published API list prices (2026-10-01): [input, output, cacheRead, cacheWrite5m, cacheWrite1h]
 const PRICE = {

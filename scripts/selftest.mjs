@@ -1,18 +1,22 @@
 // Stress test for automatic recall. Safe to run anywhere: it works in a temporary folder.
 //   node scripts/selftest.mjs            synthetic histories in four sizes, several seeds
 //   node scripts/selftest.mjs --replay   also replays the real prompts of the current folder's history
-// It plants facts in generated sessions, then asks about them from another session inside long
-// messages, and counts: facts found, false injections on unrelated prompts, repeats of lines that are
-// still in the asking session, build time, time per prompt and tokens added.
+// It plants facts in generated sessions, then asks about the ones inside the part of the history that recall
+// searches, from another session, in a message of about 250 characters, and counts: facts found, false injections
+// on unrelated prompts, repeats of lines that are still in the asking session, build time, time per prompt and
+// tokens added.
+// --replay finds the real history where recall does: in HANDOVER_PROJECTS_DIR and HANDOVER_DATA_DIR when they are
+// set, else in <config folder>/projects and <config folder>/claude-code-handover-data, the config folder being
+// $CLAUDE_CONFIG_DIR when that is set, else ~/.claude.
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "handover-selftest-"));
+// The synthetic runs work in the temporary folder; --replay gives the person's own two settings back (see below).
+const own = { HANDOVER_PROJECTS_DIR: process.env.HANDOVER_PROJECTS_DIR, HANDOVER_DATA_DIR: process.env.HANDOVER_DATA_DIR };
 process.env.HANDOVER_PROJECTS_DIR = path.join(tmp, "projects");
 process.env.HANDOVER_DATA_DIR = path.join(tmp, "data");
-const realProjects = path.join(os.homedir(), ".claude", "projects");
-const realData = path.join(os.homedir(), ".claude", "claude-code-handover-data");
 const WINDOW = Number(process.env.HANDOVER_RECALL_WINDOW_MB || 12) * 1024 * 1024;
 const mem = await import("./memory-index.mjs");
 
@@ -112,9 +116,13 @@ for (const [s, t, seeds] of sizes) {
 }
 
 if (process.argv.includes("--replay")) {
-  // Replay every real prompt of this folder's history as if it were asked in a brand-new session.
-  process.env.HANDOVER_PROJECTS_DIR = realProjects;
-  process.env.HANDOVER_DATA_DIR = realData;
+  // Replay every real prompt of this folder's history as if it were asked in a brand-new session. The two settings go
+  // back to what the person had (or are removed), and memory-index.mjs works out the folders as it does for the hook:
+  // they follow CLAUDE_CONFIG_DIR, not a fixed ~/.claude.
+  for (const [name, value] of Object.entries(own)) {
+    if (value === undefined) delete process.env[name];
+    else process.env[name] = value;
+  }
   const cwd = process.cwd();
   mem.updateIndex(cwd, { budgetMs: 8000 });
   const idx = path.join(mem.dataDir(cwd), "index.jsonl");
@@ -129,7 +137,7 @@ if (process.argv.includes("--replay")) {
     }
     const n = Math.max(1, prompts.length);
     console.log(`\nReplay of ${prompts.length} real prompts: recall added something on ${hit} (${Math.round((100 * hit) / n)}%), ${tokens(chars / Math.max(1, hit))} tokens when it did, ${tokens(chars / n)} tokens per prompt on average, ${Math.round(ms / n)} ms per prompt (worst ${worst} ms).`);
-  } else console.log("\nReplay: no index for this folder.");
+  } else console.log(`\nReplay: no index for this folder (it looked for transcripts in ${mem.transcriptsDir(cwd)}).`);
 }
 fs.rmSync(tmp, { recursive: true, force: true });
 console.log(failed ? `\n${failed} run(s) FAILED` : "\nAll synthetic runs passed.");

@@ -6,6 +6,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { EMOJI, ROOT, cli, withBox } from "./helpers.mjs";
 import { OPTIONS } from "../src/cli.mjs";
+import { FAMILIES } from "../src/models.mjs";
 
 const read = (...p) => fs.readFileSync(path.join(ROOT, ...p), "utf8");
 const pkg = JSON.parse(read("package.json"));
@@ -123,9 +124,80 @@ test("CONTRIBUTING describes bin/, src/ and test/, and how to run the tests", ()
   }
 });
 
-test("CI runs npm test on Ubuntu, Windows and macOS with Node 20, 22 and 24", () => {
+test("CI runs npm test on Ubuntu, Windows and macOS with Node 20, 22 and 24, and on Ubuntu with Node 18", () => {
   const ci = read(".github", "workflows", "test.yml");
   for (const needle of ["ubuntu-latest", "windows-latest", "macos-latest", "node: [20, 22, 24]", "npm test"]) assert.ok(ci.includes(needle), needle);
+  assert.match(ci, /include:\s*\n\s*- os: ubuntu-latest\s*\n\s*node: ["']?18["']?\s*\n/, "one more job: Node 18, the oldest the package supports, on Linux");
+  const docs = `${read("CONTRIBUTING.md")}\n${read("README.md")}`;
+  assert.ok(docs.includes("Node 18"), "the docs say so");
+  assert.ok(!/\b(?:nine|ten|\d+) jobs\b/.test(docs), "and do not count the jobs, which changes when the matrix does");
+});
+
+// ---- documents that must match what the code does --------------------------------------------
+
+test("the README documents every HANDOVER_ setting the scripts read, and how the guard's limit follows the window", () => {
+  const readme = read("README.md");
+  const settings = new Set();
+  for (const f of sourceFiles("scripts")) for (const m of read(...f.split("/")).matchAll(/process\.env\.(HANDOVER_[A-Z_]+)/g)) settings.add(m[1]);
+  assert.deepEqual([...settings].sort(), [
+    "HANDOVER_AUTORECALL", "HANDOVER_CONTEXT_LIMIT", "HANDOVER_CONTEXT_WINDOW", "HANDOVER_DATA_DIR", "HANDOVER_PROJECTS_DIR",
+    "HANDOVER_RECALL_STRICTNESS", "HANDOVER_RECALL_WINDOW_MB", "HANDOVER_STALE_MINUTES",
+  ], "a new setting in a script needs a line in the README's tuning paragraph, and here");
+  for (const name of settings) assert.ok(readme.includes(`\`${name}`), `the README documents ${name}`);
+  assert.ok(readme.includes("the limit is 35% of `HANDOVER_CONTEXT_WINDOW`"), "the limit follows the window");
+  assert.ok(readme.includes("`HANDOVER_CONTEXT_LIMIT` (tokens) sets the limit itself and wins when it is set"));
+});
+
+test("the README names the model id that init writes for one model, for every family", () => {
+  const readme = read("README.md");
+  for (const family of Object.values(FAMILIES)) assert.ok(readme.includes(family.id), `the README names ${family.id}`);
+});
+
+test("no document, message or comment says the guard holds the turn open until the handover is written; they give the real rule", () => {
+  const stale = /holds? (?:a|the) turn open|held turn|until the handover is written|will not let a turn end|before the turn can end|forced by the guard|makes Claude write/i;
+  const files = ["README.md", "SECURITY.md", "CONTRIBUTING.md", "SETUP-PROMPT.md", "setup-prompt.txt", "templates/claude-token-rules.md", ...sourceFiles("src"), ...sourceFiles("scripts")];
+  for (const f of files) assert.ok(!stale.test(read(...f.split("/"))), `${f} still says the guard holds the turn open`);
+  for (const f of ["README.md", "SETUP-PROMPT.md", "setup-prompt.txt", "templates/claude-token-rules.md", "src/install.mjs"]) {
+    const text = read(...f.split("/"));
+    assert.ok(/asks (?:Claude )?once/.test(text), `${f} says the guard asks once`);
+    assert.ok(text.includes("30 minutes"), `${f} gives the 30 minutes`);
+    assert.ok(text.includes("HANDOVER_CONTEXT_WINDOW"), `${f} says 35% is a share of the window`);
+  }
+});
+
+test("the scripts open no network connection and start no other program, as SECURITY.md says", () => {
+  for (const f of sourceFiles("scripts")) {
+    const text = read(...f.split("/"));
+    assert.ok(!/node:(?:net|tls|dns|dgram|http|https|http2|child_process)\b|\bfetch\s*\(|\bWebSocket\b|\bXMLHttpRequest\b/.test(text), `${f} could reach the network or run another program`);
+  }
+});
+
+test("SECURITY.md says what reaches Claude and what uninstall keeps", () => {
+  const text = read("SECURITY.md");
+  assert.ok(!/send nothing anywhere|takes its user-level changes out again/.test(text));
+  for (const needle of ["open no network connection", "added to your next prompt", "claude-code-handover-data", "cleanupPeriodDays", "settings.json.bak-"]) assert.ok(text.includes(needle), needle);
+});
+
+test("the README says init keeps a rules card that differs, builds the recall index, and what uninstall keeps", () => {
+  const readme = read("README.md");
+  for (const needle of ["claude-token-rules.md.bak-YYYYMMDD", "**The recall index**", "the recall index (`claude-code-handover-data` in the config folder", "(including `cleanupPeriodDays`)"]) {
+    assert.ok(readme.includes(needle), needle);
+  }
+});
+
+test("CONTRIBUTING tries the installer with exported variables, so a later uninstall cannot reach the real ~/.claude", () => {
+  const text = read("CONTRIBUTING.md");
+  assert.ok(text.includes('export CLAUDE_CONFIG_DIR="$tmp/claude" HOME="$tmp" USERPROFILE="$tmp"'));
+  assert.ok(!/USERPROFILE="\$tmp" node /.test(text), "a variable in front of one command applies to that command only");
+  assert.ok(text.includes("That route has no sandbox: it changes your real `~/.claude`"), "the prompt route is said to change the real ~/.claude");
+});
+
+test("the setup prompt says what init does: the backup name, a longer cleanupPeriodDays, and a plain copy of the scripts", () => {
+  const prompt = read("setup-prompt.txt");
+  assert.ok(prompt.includes("settings.json.bak-YYYYMMDD") && !prompt.includes("bak-<today>"));
+  assert.ok(prompt.includes("If cleanupPeriodDays is already above 365, keep it."));
+  assert.ok(prompt.includes("already exists and has a .git folder, run `git pull`") && prompt.includes("If it exists without one"), "git pull only where there is a checkout");
+  assert.ok(prompt.includes("the first row names the model that does the chores (Sonnet, else Haiku, else the cheapest I have)"));
 });
 
 test("the project's own .gitignore keeps backups out of the repository", () => {
