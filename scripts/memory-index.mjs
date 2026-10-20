@@ -18,6 +18,21 @@ const MAX_CHUNKS = 6;
 const SKIP = ["<", "Stop hook feedback", "[Request interrupted", "Another Claude session sent a message", "This session is being continued", "Caveat:", "No response requested"];
 const STOP = new Set(("the a an and or but if then else for to of in on at by with from as is are was were be been being it this that these those i you he she we they me my your our their its not no yes do does did done have has had can could should would will shall may might must just also only very more most less least so such than too into over under about above after before again once here there when where why how what which who whom all any both each few other some own same don now please need want make made get got give gave use used using let lets like one two new old way thing things still even much many well back then them him her out off put see say said tell told know think going come came take took look looks good right okay yes yeah").split(" "));
 
+const SINCE_UNIT_MS = { h: 3600000, d: 86400000, w: 7 * 86400000 };
+export function parseSince(value, now = Date.now()) {
+  if (value === undefined || value === null) return null;
+  const text = String(value).trim();
+  const ago = /^(\d+)\s*([hdw])$/i.exec(text);
+  if (ago) return now - Number(ago[1]) * SINCE_UNIT_MS[ago[2].toLowerCase()];
+  const day = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
+  if (day) {
+    const [y, m, d] = day.slice(1).map(Number);
+    const date = new Date(y, m - 1, d);
+    if (date.getFullYear() === y && date.getMonth() === m - 1 && date.getDate() === d) return date.getTime();
+  }
+  throw new Error(`--since needs a number of hours, days or weeks (12h, 7d, 2w) or a date (YYYY-MM-DD), not "${text}".`);
+}
+
 export const projectKey = (cwd) => cwd.replace(/[^A-Za-z0-9]/g, "-");
 export const transcriptsDir = (cwd) => path.join(process.env.HANDOVER_PROJECTS_DIR || path.join(CONFIG, "projects"), projectKey(cwd));
 export const dataDir = (cwd) => path.join(process.env.HANDOVER_DATA_DIR || path.join(CONFIG, "claude-code-handover-data"), projectKey(cwd));
@@ -76,7 +91,7 @@ export function updateIndex(cwd, { budgetMs = 2500 } = {}) {
       if (t.length < 12 || SKIP.some((p) => t.startsWith(p))) continue;
       const d = (o.timestamp || "").slice(0, 10);
       for (let i = 0, c = 0; i < t.length && c < MAX_CHUNKS; i += CHUNK, c++) {
-        lines.push(JSON.stringify({ s: sid, n: st.line, d, r: o.type === "user" ? "you" : "claude", x: t.slice(i, i + CHUNK + 80) }));
+        lines.push(JSON.stringify({ s: sid, n: st.line, d, ...(o.timestamp ? { ts: o.timestamp } : {}), r: o.type === "user" ? "you" : "claude", x: t.slice(i, i + CHUNK + 80) }));
       }
     }
     st.offset += lastNl + 1;
@@ -153,7 +168,8 @@ function logChoose(n, k) {
 
 // Returns up to `max` past snippets. The prompt is matched sentence by sentence, so a long message
 // with instructions around one real question still finds what was said about that question.
-export function search(cwd, prompt, { sessionId = "", max = 3, remember = false } = {}) {
+export function search(cwd, prompt, { sessionId = "", max = 3, remember = false, since = null } = {}) {
+  const sinceMs = typeof since === "number" ? since : parseSince(since);
   const sentences = prompt.split(/[.?!\n;]+/).map((s) => terms(s)).filter((s) => s.length >= 2).slice(0, 16);
   if (!sentences.length) return [];
   const q = [...new Set(sentences.flat())].slice(0, 80);
@@ -174,13 +190,27 @@ export function search(cwd, prompt, { sessionId = "", max = 3, remember = false 
     if (span < size) lines.shift(); // the first line is cut off
     for (const line of lines) {
       if (!line) continue;
-      try { entries.push(JSON.parse(line)); } catch { /* skip */ }
+      try {
+        const e = JSON.parse(line);
+        if (sinceMs !== null) {
+          const entryTime = e.ts ? Date.parse(e.ts) : (e.d ? new Date(e.d.slice(0, 4), e.d.slice(5, 7) - 1, e.d.slice(8, 10), 23, 59, 59, 999).getTime() : 0);
+          if (entryTime < sinceMs) continue;
+        }
+        entries.push(e);
+      } catch { /* skip */ }
     }
   }
   const dec = path.join(cwd, "DECISIONS.md");
   if (fs.existsSync(dec)) {
     for (const line of fs.readFileSync(dec, "utf8").split("\n")) {
-      if (/^- \d{4}-\d{2}-\d{2}/.test(line)) entries.push({ s: "DECISIONS", d: line.slice(2, 12), r: "log", x: line.slice(13).trim(), dec: 1 });
+      if (/^- \d{4}-\d{2}-\d{2}/.test(line)) {
+        const d = line.slice(2, 12);
+        if (sinceMs !== null) {
+          const lineTime = new Date(d.slice(0, 4), d.slice(5, 7) - 1, d.slice(8, 10), 23, 59, 59, 999).getTime();
+          if (lineTime < sinceMs) continue;
+        }
+        entries.push({ s: "DECISIONS", d, r: "log", x: line.slice(13).trim(), dec: 1 });
+      }
     }
   }
   const N = entries.length;

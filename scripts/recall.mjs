@@ -1,22 +1,39 @@
 // Recall: search every past Claude Code transcript of this project for a topic.
 // Prints the matching things you and Claude said, with date and session title, newest first.
-// Usage: node recall.mjs <word or words> [--all] [--limit N] [--root <projects folder>]
+// Usage: node recall.mjs <word or words> [--all] [--limit N] [--since <when>] [--root <projects folder>]
 //   --all    search every project on this machine, not only the current folder's
 // Nothing leaves your machine. Transcripts live in ~/.claude/projects ($CLAUDE_CONFIG_DIR/projects when that is set).
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { parseSince } from "./memory-index.mjs";
 
 const args = process.argv.slice(2);
 const flag = (name) => { const i = args.indexOf(name); return i > -1 ? args.splice(i, 1) && true : false; };
-const opt = (name, dflt) => { const i = args.indexOf(name); if (i === -1) return dflt; const v = args[i + 1]; args.splice(i, 2); return v; };
+const opt = (name, dflt) => {
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === name) { const v = args[i + 1]; args.splice(i, 2); return v; }
+    if (args[i].startsWith(`${name}=`)) { const v = args[i].slice(name.length + 1); args.splice(i, 1); return v; }
+  }
+  return dflt;
+};
 const ALL = flag("--all");
 const LIMIT = Number(opt("--limit", 40));
+const rawSince = opt("--since", null);
+let SINCE = null;
+if (rawSince !== null) {
+  try {
+    SINCE = parseSince(rawSince);
+  } catch (err) {
+    console.error(err.message);
+    process.exit(1);
+  }
+}
 // Claude Code keeps its transcripts in <config folder>/projects: $CLAUDE_CONFIG_DIR when that is set, else ~/.claude.
 const CONFIG = (process.env.CLAUDE_CONFIG_DIR || "").trim() ? path.resolve(process.env.CLAUDE_CONFIG_DIR.trim()) : path.join(os.homedir(), ".claude");
 const ROOT = opt("--root", process.env.HANDOVER_PROJECTS_DIR || path.join(CONFIG, "projects"));
 const words = args.join(" ").trim().toLowerCase().split(/\s+/).filter(Boolean);
-if (!words.length) { console.log("Usage: node recall.mjs <word or words> [--all] [--limit N]"); process.exit(0); }
+if (!words.length) { console.log("Usage: node recall.mjs <word or words> [--all] [--limit N] [--since <when>]"); process.exit(0); }
 
 const projectKey = process.cwd().replace(/[^A-Za-z0-9]/g, "-");
 const dirs = ALL ? fs.readdirSync(ROOT).map((d) => path.join(ROOT, d)) : [path.join(ROOT, projectKey)];
@@ -49,6 +66,8 @@ for (const dir of dirs) {
       if (!text || text.startsWith("<")) continue; // skip injected system blocks
       const lower = text.toLowerCase();
       if (!words.every((w) => lower.includes(w))) continue;
+      const t = Date.parse(o.timestamp);
+      if (SINCE !== null && Number.isFinite(t) && t < SINCE) continue;
       hits.push({ ts: o.timestamp || "", title, role: o.type, text: snippet(text, lower.indexOf(words[0])), project: path.basename(dir) });
     }
   }
@@ -59,7 +78,15 @@ for (const f of ["DECISIONS.md", "HANDOVER.md"]) {
   if (!fs.existsSync(p)) continue;
   for (const line of fs.readFileSync(p, "utf8").split("\n")) {
     const lower = line.toLowerCase();
-    if (line && words.every((w) => lower.includes(w))) hits.push({ ts: "9999", title: f, role: "note", text: line.trim(), project: "" });
+    if (line && words.every((w) => lower.includes(w))) {
+      const m = /^- (\d{4}-\d{2}-\d{2})/.exec(line);
+      if (m && SINCE !== null) {
+        const [y, mo, da] = m[1].split("-").map(Number);
+        const endOfDay = new Date(y, mo - 1, da, 23, 59, 59, 999).getTime();
+        if (endOfDay < SINCE) continue;
+      }
+      hits.push({ ts: m ? m[1] : "9999", title: f, role: "note", text: line.trim(), project: "" });
+    }
   }
 }
 
