@@ -4,28 +4,22 @@
 //   --all    search every project on this machine, not only the current folder's
 // Nothing leaves your machine. Transcripts live in ~/.claude/projects ($CLAUDE_CONFIG_DIR/projects when that is set).
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
+import { configDir, positiveSetting, textOf } from "./common.mjs";
 
 const args = process.argv.slice(2);
 const flag = (name) => { const i = args.indexOf(name); return i > -1 ? args.splice(i, 1) && true : false; };
 const opt = (name, dflt) => { const i = args.indexOf(name); if (i === -1) return dflt; const v = args[i + 1]; args.splice(i, 2); return v; };
 const ALL = flag("--all");
-const LIMIT = Number(opt("--limit", 40));
+const LIMIT = positiveSetting(opt("--limit", 40), 40);
 // Claude Code keeps its transcripts in <config folder>/projects: $CLAUDE_CONFIG_DIR when that is set, else ~/.claude.
-const CONFIG = (process.env.CLAUDE_CONFIG_DIR || "").trim() ? path.resolve(process.env.CLAUDE_CONFIG_DIR.trim()) : path.join(os.homedir(), ".claude");
-const ROOT = opt("--root", process.env.HANDOVER_PROJECTS_DIR || path.join(CONFIG, "projects"));
+const ROOT = opt("--root", process.env.HANDOVER_PROJECTS_DIR || path.join(configDir(), "projects"));
 const words = args.join(" ").trim().toLowerCase().split(/\s+/).filter(Boolean);
 if (!words.length) { console.log("Usage: node recall.mjs <word or words> [--all] [--limit N]"); process.exit(0); }
 
 const projectKey = process.cwd().replace(/[^A-Za-z0-9]/g, "-");
 const dirs = ALL ? fs.readdirSync(ROOT).map((d) => path.join(ROOT, d)) : [path.join(ROOT, projectKey)];
 
-function textOf(content) {
-  if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return "";
-  return content.filter((b) => b.type === "text" && b.text).map((b) => b.text).join("\n");
-}
 function snippet(text, pos) {
   const start = Math.max(0, pos - 220), end = Math.min(text.length, pos + 320);
   return (start > 0 ? "..." : "") + text.slice(start, end).replace(/\s+/g, " ").trim() + (end < text.length ? "..." : "");

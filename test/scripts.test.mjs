@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import { pathToFileURL } from "node:url";
 import { ROOT, exists, projectKey, read, runInit, withBox, write, writeTranscript } from "./helpers.mjs";
 
 /** Run one of the repository's scripts in the project folder. `drop` lists environment variables to remove. */
@@ -308,3 +309,97 @@ test("the hook still runs and stays silent when there are no transcripts at all"
   assert.equal(r.stdout, "");
   assert.equal(r.stderr, "");
 }));
+
+// ---------------------------------------------------------------------------------------------
+// Settings that are not numbers, words in any script, and the signature file
+// ---------------------------------------------------------------------------------------------
+
+test("a limit or a stale-minutes setting that is not a number counts as unset, so the guard keeps its defaults", withBox((box) => {
+  for (const value of ["abc", "", "  ", "NaN", "-1", "0", "Infinity"]) {
+    const env = { HANDOVER_CONTEXT_LIMIT: value };
+    assert.equal(guard(box, "UserPromptSubmit", { tokens: 300000, env }), "", JSON.stringify(value));
+    assert.match(guard(box, "UserPromptSubmit", { tokens: 400000, env }), warns(40, 400), JSON.stringify(value));
+  }
+  for (const value of ["abc", "", "NaN", "-5", "Infinity"]) {
+    const env = { HANDOVER_STALE_MINUTES: value };
+    assert.equal(guard(box, "Stop", { tokens: 400000, ageMin: 5, env }), "", JSON.stringify(value));
+    assert.equal(JSON.parse(guard(box, "Stop", { tokens: 400000, ageMin: 60, env })).decision, "block", JSON.stringify(value));
+  }
+  assert.equal(JSON.parse(guard(box, "Stop", { tokens: 400000, ageMin: 0, env: { HANDOVER_STALE_MINUTES: "0" } })).decision, "block", "0 minutes: ask whenever a turn ends above the limit");
+}));
+
+// The index module in this process, pointed at the sandbox for the length of a test.
+const mem = await import(pathToFileURL(path.join(ROOT, "scripts", "memory-index.mjs")).href);
+function inBox(box, fn) {
+  const saved = { HANDOVER_PROJECTS_DIR: process.env.HANDOVER_PROJECTS_DIR, HANDOVER_DATA_DIR: process.env.HANDOVER_DATA_DIR };
+  process.env.HANDOVER_PROJECTS_DIR = box.projects;
+  process.env.HANDOVER_DATA_DIR = box.data;
+  try { return fn(); } finally {
+    for (const [k, v] of Object.entries(saved)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
+  }
+}
+const build = (box) => { let r; do { r = mem.updateIndex(box.project); } while (!r.complete); };
+
+test("recall matches words in any script, with their vowel signs and accents, not only ASCII letters", withBox((box) => inBox(box, () => {
+  const sid = "33333333-aaaa-4aaa-8aaa-000000000003";
+  const rows = [
+    { type: "user", timestamp: "2026-09-30T10:00:00Z", message: { role: "user", content: "விலைப்பட்டியல் ஏற்றுமதிக்கு எந்த கேச் அமைப்பை பயன்படுத்துகிறோம்?" } },
+    { type: "assistant", timestamp: "2026-09-30T10:00:05Z", message: { role: "assistant", content: [{ type: "text", text: "விலைப்பட்டியல் ஏற்றுமதிக்கு warm-cache அமைப்பை தேர்ந்தெடுத்தோம், ஏனெனில் குளிர் தொடக்கம் பதினொரு வினாடிகள் எடுத்தது." }], usage: {} } },
+    { type: "assistant", timestamp: "2026-09-30T10:01:05Z", message: { role: "assistant", content: [{ type: "text", text: "Für den Rechnungsexport wurde die Größe der Warteschlange auf zwölf Einträge begrenzt." }], usage: {} } },
+    { type: "assistant", timestamp: "2026-09-30T10:02:05Z", message: { role: "assistant", content: [{ type: "text", text: "The nightly build publishes the documentation site after the unit tests pass." }], usage: {} } },
+  ];
+  write(path.join(box.projects, key(box), `${sid}.jsonl`), rows.map((r) => JSON.stringify(r)).join("\n") + "\n");
+  build(box);
+  const words = mem.terms("Größe der Warteschlange: 12 Einträge, siehe ABC-42. விலைப்பட்டியல்!");
+  for (const w of ["größe", "warteschlange", "einträge", "abc-42", "விலைப்பட்டியல்"]) assert.ok(words.includes(w), `${w} is a term: ${words}`);
+  assert.ok(!words.includes("12"), "a number alone is not a term");
+  const tamil = mem.search(box.project, "விலைப்பட்டியல் ஏற்றுமதிக்கு எந்த கேச் அமைப்பை தேர்ந்தெடுத்தோம்? ஒரு வரியில் சொல்லுங்கள்.", { sessionId: "new" });
+  assert.ok(tamil.length >= 1 && tamil.some((f) => f.text.includes("warm-cache")), JSON.stringify(tamil));
+  const german = mem.search(box.project, "Wie groß ist die Warteschlange für den Rechnungsexport?", { sessionId: "new" });
+  assert.ok(german.length >= 1 && german.some((f) => f.text.includes("zwölf Einträge")), JSON.stringify(german));
+  assert.deepEqual(mem.search(box.project, "Please rename the staging cluster and rotate its credentials.", { sessionId: "new" }), [], "an unrelated question stays silent");
+})));
+
+test("the signature file skips text searches without changing what recall finds, and is rebuilt when it does not match", withBox((box) => inBox(box, () => {
+  writeTranscript(box, box.project);
+  const sid = "44444444-aaaa-4aaa-8aaa-000000000004";
+  const rows = [{ type: "custom-title", customTitle: "Filler", sessionId: sid }];
+  for (let i = 0; i < 60; i++) {
+    const text = `Filler remark number ${i} about the ${["parser", "scheduler", "renderer", "uploader"][i % 4]} module and its ${["tests", "docs", "metrics"][i % 3]}.${i === 17 ? " The retention window for uploads is forty days." : ""}`;
+    rows.push({ type: "assistant", timestamp: "2026-09-29T10:00:00Z", message: { role: "assistant", content: [{ type: "text", text }], usage: {} } });
+  }
+  write(path.join(box.projects, key(box), `${sid}.jsonl`), rows.map((r) => JSON.stringify(r)).join("\n") + "\n");
+  build(box);
+  const dir = mem.dataDir(box.project);
+  const entries = read(path.join(dir, "index.jsonl")).split("\n").filter(Boolean).length;
+  assert.equal(entries, 62);
+  const state = () => JSON.parse(read(path.join(dir, "state.json")));
+  assert.equal(state().sig.entries, entries, "every entry is signed");
+  assert.equal(state().sig.offset, fs.statSync(path.join(dir, "index.jsonl")).size, "up to the end of the index");
+  assert.equal(fs.statSync(path.join(dir, "sig.bin")).size, entries * mem.SIG_BYTES);
+
+  const ask = "Which cache setting did we choose for the invoice exporter, and what was the reason?";
+  const expected = mem.search(box.project, ask, { sessionId: "new" });
+  assert.ok(expected.length >= 1 && expected[0].text.includes("warm-cache"), JSON.stringify(expected));
+  const retention = "What is the retention window for uploads?";
+  const filler = mem.search(box.project, retention, { sessionId: "new" });
+  assert.ok(filler.length >= 1 && /forty days/.test(filler[0].text), JSON.stringify(filler));
+  assert.deepEqual(mem.search(box.project, "Tell me about the scheduler module metrics.", { sessionId: "new" }), [], "words that most remarks share are not a match");
+
+  // A signature file that does not agree with state.json is left out of the search (same result) and rebuilt by the next update.
+  fs.truncateSync(path.join(dir, "sig.bin"), mem.SIG_BYTES);
+  assert.deepEqual(mem.search(box.project, ask, { sessionId: "new" }), expected, "the same result without a usable signature file");
+  assert.deepEqual(mem.search(box.project, retention, { sessionId: "new" }), filler);
+  build(box);
+  assert.equal(fs.statSync(path.join(dir, "sig.bin")).size, entries * mem.SIG_BYTES, "rebuilt in full");
+  assert.equal(state().sig.entries, entries);
+  assert.deepEqual(mem.search(box.project, ask, { sessionId: "new" }), expected, "and the same result with it");
+
+  // A new remark is signed as it is indexed, so the two files stay in step.
+  fs.appendFileSync(path.join(box.projects, key(box), `${sid}.jsonl`), `${JSON.stringify({ type: "assistant", timestamp: "2026-09-29T11:00:00Z", message: { role: "assistant", content: [{ type: "text", text: "The uploader module now retries a failed chunk three times before it gives up." }], usage: {} } })}\n`);
+  build(box);
+  assert.equal(state().sig.entries, entries + 1);
+  assert.equal(fs.statSync(path.join(dir, "sig.bin")).size, (entries + 1) * mem.SIG_BYTES);
+  const retry = mem.search(box.project, "How many times does the uploader retry a failed chunk?", { sessionId: "new" });
+  assert.ok(retry.length >= 1 && retry[0].text.includes("three times"), JSON.stringify(retry));
+})));

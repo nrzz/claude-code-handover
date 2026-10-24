@@ -40,7 +40,7 @@ npm test
 | `SETUP-PROMPT.md`, `setup-prompt.txt` | the one-paste setup |
 | `templates/` | the files the setup writes (CLAUDE.local.md, HANDOVER.md, DECISIONS.md, settings blocks) |
 | `skills/` | the `/handover` and `/recall` skills |
-| `scripts/` | the context-guard hook, the recall index, the usage and cache audits, and the self-test; `init` copies them into the user's config folder |
+| `scripts/` | the context-guard hook, the recall index, the usage and cache audits, the self-test, and `common.mjs` with what they share (folders, the price list, token sums); `init` copies them into the user's config folder, so a script may import only `node:` modules and files in `scripts/` |
 
 ## House rules
 

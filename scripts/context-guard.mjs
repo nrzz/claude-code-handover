@@ -15,12 +15,12 @@
 //   HANDOVER_AUTORECALL      set to 0 to turn automatic recall off
 import fs from "node:fs";
 import path from "node:path";
+import { numberSetting, positiveSetting, tokensOf } from "./common.mjs";
 
-// A window that is not a positive number counts as unset, so a typo cannot turn the default limit into 0 or NaN.
-const windowSetting = Number(process.env.HANDOVER_CONTEXT_WINDOW);
-const WINDOW = Number.isFinite(windowSetting) && windowSetting > 0 ? windowSetting : 1000000;
-const LIMIT = Number(process.env.HANDOVER_CONTEXT_LIMIT || Math.round((WINDOW * 35) / 100));
-const STALE_MIN = Number(process.env.HANDOVER_STALE_MINUTES || 30);
+// A setting that is not a number counts as unset, so a typo cannot turn the limit into NaN and silence the guard.
+const WINDOW = positiveSetting(process.env.HANDOVER_CONTEXT_WINDOW, 1000000);
+const LIMIT = positiveSetting(process.env.HANDOVER_CONTEXT_LIMIT, Math.round((WINDOW * 35) / 100));
+const STALE_MIN = numberSetting(process.env.HANDOVER_STALE_MINUTES, 30); // 0 is allowed: ask whenever the turn ends above the limit
 const AUTORECALL = process.env.HANDOVER_AUTORECALL !== "0";
 
 function readStdin() {
@@ -42,14 +42,7 @@ function contextTokens(transcriptPath) {
       if (!line.includes('"type":"assistant"')) continue;
       let o; try { o = JSON.parse(line); } catch { continue; }
       if (o.type !== "assistant" || o.isSidechain || !o.message || !o.message.usage) continue;
-      const u = o.message.usage;
-      const its = Array.isArray(u.iterations) && u.iterations.length ? u.iterations : [u];
-      let ctx = 0;
-      for (const it of its) {
-        const cc = it.cache_creation || {};
-        const cw = (cc.ephemeral_5m_input_tokens ?? it.cache_creation_input_tokens ?? 0) + (cc.ephemeral_1h_input_tokens || 0);
-        ctx = Math.max(ctx, (it.input_tokens || 0) + (it.cache_read_input_tokens || 0) + cw);
-      }
+      const { ctx } = tokensOf(o.message.usage);
       if (ctx > 0) return ctx;
     }
   } catch { /* unreadable transcript: stay silent */ }

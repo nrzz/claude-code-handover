@@ -91,7 +91,8 @@ test("the copy is repaired where a file went missing or differs, and the others 
   assert.ok(fs.readFileSync(path.join(box.vendor, "scripts", "context-guard.mjs")).equals(fs.readFileSync(path.join(ROOT, "scripts", "context-guard.mjs"))));
   assert.equal(fs.statSync(kept).mtimeMs, keptTime, "an identical file is not rewritten");
   assert.equal(record(r, box.vendor).action, "copied");
-  assert.match(record(r, box.vendor).note, /^2 files .*7 files already identical/);
+  const others = listFiles(box.vendor).length - 2; // every runtime file but the two that were repaired
+  assert.match(record(r, box.vendor).note, new RegExp(`^2 files .*${others} files already identical`));
 }));
 
 test("an empty folder at the scripts' place is used", withBox((box) => {

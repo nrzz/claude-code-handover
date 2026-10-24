@@ -5,28 +5,32 @@
 // The index lives in <config folder>/claude-code-handover-data/<project>/ and never leaves the machine. The config
 // folder is $CLAUDE_CONFIG_DIR when that is set (Claude Code keeps its transcripts in <config folder>/projects), else
 // ~/.claude. HANDOVER_PROJECTS_DIR and HANDOVER_DATA_DIR override the two folders.
+// Two files: index.jsonl, one remark per line, and sig.bin, a small signature per remark (see "the signature file")
+// that lets a prompt skip most of the text searches. Both are safe to delete; they build themselves again.
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { configDir, numberSetting, positiveSetting, textOf } from "./common.mjs";
 
-const HOME = os.homedir();
-const CONFIG = (process.env.CLAUDE_CONFIG_DIR || "").trim() ? path.resolve(process.env.CLAUDE_CONFIG_DIR.trim()) : path.join(HOME, ".claude");
 const CHUNK = 600;
-const WINDOW_BYTES = Number(process.env.HANDOVER_RECALL_WINDOW_MB || 12) * 1024 * 1024; // about 35,000 remarks
+const WINDOW_BYTES = positiveSetting(process.env.HANDOVER_RECALL_WINDOW_MB, 12) * 1024 * 1024; // about 35,000 remarks
 const MAX_CHUNKS = 6;
 const SKIP = ["<", "Stop hook feedback", "[Request interrupted", "Another Claude session sent a message", "This session is being continued", "Caveat:", "No response requested"];
 const STOP = new Set(("the a an and or but if then else for to of in on at by with from as is are was were be been being it this that these those i you he she we they me my your our their its not no yes do does did done have has had can could should would will shall may might must just also only very more most less least so such than too into over under about above after before again once here there when where why how what which who whom all any both each few other some own same don now please need want make made get got give gave use used using let lets like one two new old way thing things still even much many well back then them him her out off put see say said tell told know think going come came take took look looks good right okay yes yeah").split(" "));
 
-export const projectKey = (cwd) => cwd.replace(/[^A-Za-z0-9]/g, "-");
-export const transcriptsDir = (cwd) => path.join(process.env.HANDOVER_PROJECTS_DIR || path.join(CONFIG, "projects"), projectKey(cwd));
-export const dataDir = (cwd) => path.join(process.env.HANDOVER_DATA_DIR || path.join(CONFIG, "claude-code-handover-data"), projectKey(cwd));
+// A word is a run of letters, marks (the vowel signs and accents many scripts write as separate characters) and
+// digits, in any script. Text that writes no spaces between words (Chinese, Japanese) gives one word per run of
+// characters, which still matches a repeated phrase word for word.
+const WORD_SPLIT = /[^\p{L}\p{M}\p{N}_]+/u;
+const WORD_CHAR = /[\p{L}\p{M}\p{N}_]/u;
+const WORD_ONLY = /^[\p{L}\p{M}\p{N}_]+$/u;
+const DIGITS = /^\p{N}+$/u;
+const MIN_WORD = 3;
 
-function textOf(content) {
-  if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return "";
-  return content.filter((b) => b.type === "text" && b.text).map((b) => b.text).join("\n");
-}
+export const projectKey = (cwd) => cwd.replace(/[^A-Za-z0-9]/g, "-");
+export const transcriptsDir = (cwd) => path.join(process.env.HANDOVER_PROJECTS_DIR || path.join(configDir(), "projects"), projectKey(cwd));
+export const dataDir = (cwd) => path.join(process.env.HANDOVER_DATA_DIR || path.join(configDir(), "claude-code-handover-data"), projectKey(cwd));
+
 function loadState(dir) {
   let s = {};
   try { s = JSON.parse(fs.readFileSync(path.join(dir, "state.json"), "utf8")); } catch { s = {}; }
@@ -34,7 +38,125 @@ function loadState(dir) {
   return s;
 }
 
-// Reads only the bytes added to each transcript since the last call. Stops when the time budget is used up.
+// ---- the signature file ---------------------------------------------------------------------
+// sig.bin holds SIG_BYTES per remark, in the order of index.jsonl: a Bloom filter of every word of the remark and of
+// every prefix of each word from MIN_WORD to MAX_PREFIX characters. Before a query word is looked for in a remark's
+// text, its bits are tested; a remark whose bits are not all set cannot hold a word that starts with it, so most of
+// the text searches are never made. A remark whose bits are set is still checked in its text, so the filter changes
+// how long a prompt takes and never what it finds. A file that does not agree with state.json is rebuilt from
+// index.jsonl, a little on each call, inside the time budget.
+export const SIG_BYTES = 256;
+const SIG_BITS = SIG_BYTES * 8;
+const SIG_HASHES = 3;
+const MAX_PREFIX = 12;
+const FNV_INIT = 2166136261;
+const fnvStep = (h, c) => Math.imul(h ^ c, 16777619) >>> 0;
+const sigFile = (out) => path.join(out, "sig.bin");
+
+/** Set the bits for one hash in the signature that starts at byte `at`. */
+// `>>> 0` last: `| 1` alone would give a signed integer, and a negative bit position would land in another signature.
+const stepOf = (h) => (Math.imul(h ^ (h >>> 16), 0x45d9f3b) | 1) >>> 0;
+function setBits(sig, at, h) {
+  const step = stepOf(h);
+  for (let i = 0; i < SIG_HASHES; i++) {
+    const b = (h + i * step) % SIG_BITS;
+    sig[at + (b >> 3)] |= 1 << (b & 7);
+  }
+}
+/** The bit positions a query word must find set, or null for a word the filter cannot answer (an id with a hyphen). */
+function bitsOf(word) {
+  if (!WORD_ONLY.test(word)) return null;
+  let h = FNV_INIT;
+  const n = Math.min(word.length, MAX_PREFIX);
+  for (let k = 0; k < n; k++) h = fnvStep(h, word.charCodeAt(k));
+  const step = stepOf(h);
+  const bits = [];
+  for (let i = 0; i < SIG_HASHES; i++) bits.push((h + i * step) % SIG_BITS);
+  return bits;
+}
+/** Sign one remark: every word and every prefix of it, so that a query word matches a word that starts with it. */
+function signText(lower, sig, at) {
+  for (const w of lower.split(WORD_SPLIT)) {
+    if (w.length < MIN_WORD) continue;
+    let h = FNV_INIT;
+    const n = Math.min(w.length, MAX_PREFIX);
+    for (let k = 0; k < n; k++) {
+      h = fnvStep(h, w.charCodeAt(k)); // the running hash after k+1 characters is the hash of that prefix
+      if (k + 1 >= MIN_WORD) setBits(sig, at, h);
+    }
+  }
+}
+function maybeHas(sig, at, bits) {
+  for (const b of bits) if (!(sig[at + (b >> 3)] & (1 << (b & 7)))) return false;
+  return true;
+}
+
+/** The signature state when sig.bin agrees with it; otherwise a reset, and the file is built again from index.jsonl. */
+function sigState(out, state, indexSize) {
+  const s = state.sig;
+  const sane = s && Number.isInteger(s.entries) && s.entries >= 0 && Number.isInteger(s.offset) && s.offset >= 0;
+  let fileSize = 0;
+  try { fileSize = fs.statSync(sigFile(out)).size; } catch { fileSize = 0; }
+  if (!sane || fileSize !== s.entries * SIG_BYTES || s.offset > indexSize) return { entries: 0, offset: 0, reset: true };
+  return { entries: s.entries, offset: s.offset, reset: false };
+}
+
+/** Sign the lines of index.jsonl that have no signature yet, inside the time budget. Returns { changed, complete }. */
+function signIndex(out, state, started, budgetMs) {
+  const indexPath = path.join(out, "index.jsonl");
+  let size;
+  try { size = fs.statSync(indexPath).size; } catch { return { changed: false, complete: true }; }
+  const sig = sigState(out, state, size);
+  let changed = false;
+  if (sig.reset) {
+    fs.writeFileSync(sigFile(out), "");
+    state.sig = { entries: 0, offset: 0 };
+    changed = true;
+  }
+  let { entries, offset } = sig;
+  if (offset >= size) return { changed, complete: true };
+  const fd = fs.openSync(indexPath, "r");
+  const parts = [];
+  let complete = true;
+  try {
+    while (offset < size) {
+      if (Date.now() - started > budgetMs) { complete = false; break; }
+      const len = Math.min(size - offset, 4 * 1024 * 1024);
+      const buf = Buffer.alloc(len);
+      fs.readSync(fd, buf, 0, len, offset);
+      const lastNl = buf.lastIndexOf(10);
+      if (lastNl === -1) break; // a line still being written
+      for (let pos = 0; pos <= lastNl;) {
+        const nl = buf.indexOf(10, pos);
+        const line = buf.toString("utf8", pos, nl);
+        pos = nl + 1;
+        const e = parseEntry(line); // the same lines search() skips are skipped here, so the two files stay in step
+        if (!e) continue;
+        const s = Buffer.alloc(SIG_BYTES);
+        signText(e.x.toLowerCase(), s, 0);
+        parts.push(s);
+        entries++;
+      }
+      offset += lastNl + 1;
+    }
+  } finally { fs.closeSync(fd); }
+  if (parts.length) fs.appendFileSync(sigFile(out), Buffer.concat(parts));
+  if (offset !== sig.offset || sig.reset) { state.sig = { entries, offset }; changed = true; }
+  return { changed, complete };
+}
+
+/** One index line as an entry, or null for an empty, broken or textless line. */
+function parseEntry(line) {
+  if (!line) return null;
+  let e;
+  try { e = JSON.parse(line); } catch { return null; }
+  return e && typeof e.x === "string" ? e : null;
+}
+
+// ---- the index ------------------------------------------------------------------------------
+
+// Reads only the bytes added to each transcript since the last call, then signs what is new. Stops when the time
+// budget is used up; `complete` says whether everything is done.
 export function updateIndex(cwd, { budgetMs = 2500 } = {}) {
   const dir = transcriptsDir(cwd);
   if (!fs.existsSync(dir)) return { added: 0, complete: true };
@@ -84,6 +206,9 @@ export function updateIndex(cwd, { budgetMs = 2500 } = {}) {
     changed = true;
   }
   if (lines.length) fs.appendFileSync(path.join(out, "index.jsonl"), lines.join("\n") + "\n");
+  const signed = signIndex(out, state, started, budgetMs);
+  if (signed.changed) changed = true;
+  if (!signed.complete) complete = false;
   if (changed) fs.writeFileSync(path.join(out, "state.json"), JSON.stringify(state));
   return { added: lines.length, complete };
 }
@@ -91,24 +216,29 @@ export function updateIndex(cwd, { budgetMs = 2500 } = {}) {
 export function terms(text) {
   const seen = new Set();
   const out = [];
-  for (const w of text.toLowerCase().split(/[^a-z0-9_]+/)) {
-    if (w.length < 3 || STOP.has(w) || seen.has(w) || /^\d+$/.test(w)) continue;
+  const lower = text.toLowerCase();
+  for (const w of lower.split(WORD_SPLIT)) {
+    if (w.length < MIN_WORD || STOP.has(w) || seen.has(w) || DIGITS.test(w)) continue;
     seen.add(w);
     out.push(w);
   }
   // Ticket-style ids such as ABC-123 are kept whole: they are the most specific words in a prompt.
-  for (const id of text.toLowerCase().match(/[a-z]{2,}-\d+/g) || []) if (!seen.has(id)) { seen.add(id); out.push(id); }
+  for (const id of lower.match(/[a-z]{2,}-\d+/g) || []) if (!seen.has(id)) { seen.add(id); out.push(id); }
   return out.slice(0, 40);
+}
+
+// True when the UTF-16 unit `c` is part of a word: a letter, a mark or a digit in any script, or an underscore.
+function isWordCode(c) {
+  if (c < 128) return (c >= 48 && c <= 57) || (c >= 97 && c <= 122) || (c >= 65 && c <= 90) || c === 95;
+  if (c >= 0xd800 && c <= 0xdfff) return true; // half of a character outside the basic plane: a letter, as far as this goes
+  return WORD_CHAR.test(String.fromCharCode(c));
 }
 
 // Position where `word` starts a word in `text`, or -1. Both are lower case.
 function wordStart(text, word) {
   let i = text.indexOf(word);
   while (i !== -1) {
-    if (i === 0) return 0;
-    const c = text.charCodeAt(i - 1);
-    const alnum = (c >= 48 && c <= 57) || (c >= 97 && c <= 122) || c === 95;
-    if (!alnum) return i;
+    if (i === 0 || !isWordCode(text.charCodeAt(i - 1))) return i;
     i = text.indexOf(word, i + 1);
   }
   return -1;
@@ -119,8 +249,7 @@ function positions(text, word, limit = 4) {
   const out = [];
   let i = text.indexOf(word);
   while (i !== -1 && out.length < limit) {
-    const c = i === 0 ? 32 : text.charCodeAt(i - 1);
-    if (!((c >= 48 && c <= 57) || (c >= 97 && c <= 122) || c === 95)) out.push(i);
+    if (i === 0 || !isWordCode(text.charCodeAt(i - 1))) out.push(i);
     i = text.indexOf(word, i + 1);
   }
   return out;
@@ -151,6 +280,51 @@ function logChoose(n, k) {
   return v;
 }
 
+/**
+ * The newest part of the index, and the signatures of the entries that have one. Only the newest WINDOW_BYTES are
+ * searched, so a prompt costs the same after years of use; older remarks stay reachable through /recall and the
+ * decisions log. Returns { entries, signed, sig }: the first `signed` entries have their signature in `sig`.
+ */
+function readWindow(out, state) {
+  const indexPath = path.join(out, "index.jsonl");
+  const entries = [];
+  if (!fs.existsSync(indexPath)) return { entries, signed: 0, sig: null };
+  const size = fs.statSync(indexPath).size;
+  const span = Math.min(size, WINDOW_BYTES);
+  const buf = Buffer.alloc(span);
+  const fd = fs.openSync(indexPath, "r");
+  fs.readSync(fd, buf, 0, span, size - span);
+  fs.closeSync(fd);
+  const windowStart = size - span;
+  let pos = 0;
+  if (span < size) { const nl = buf.indexOf(10); pos = nl === -1 ? span : nl + 1; } // the first line is cut off
+  const s = sigState(out, state, size);
+  const signedUpTo = s.reset ? 0 : s.offset;
+  let signed = 0;
+  while (pos < span) {
+    let nl = buf.indexOf(10, pos);
+    if (nl === -1) nl = span;
+    const e = parseEntry(buf.toString("utf8", pos, nl));
+    const startByte = windowStart + pos;
+    pos = nl + 1;
+    if (!e) continue;
+    if (startByte < signedUpTo) signed++; // the signed part of the file is its head, so these come first
+    entries.push(e);
+  }
+  let sig = null;
+  const first = s.entries - signed; // the window's signed lines are the last `signed` signatures before the signed offset
+  if (signed && first >= 0) {
+    sig = Buffer.alloc(signed * SIG_BYTES);
+    try {
+      const sfd = fs.openSync(sigFile(out), "r");
+      const got = fs.readSync(sfd, sig, 0, sig.length, first * SIG_BYTES);
+      fs.closeSync(sfd);
+      if (got !== sig.length) sig = null;
+    } catch { sig = null; }
+  }
+  return { entries, signed: sig ? signed : 0, sig };
+}
+
 // Returns up to `max` past snippets. The prompt is matched sentence by sentence, so a long message
 // with instructions around one real question still finds what was said about that question.
 export function search(cwd, prompt, { sessionId = "", max = 3, remember = false } = {}) {
@@ -159,24 +333,7 @@ export function search(cwd, prompt, { sessionId = "", max = 3, remember = false 
   const q = [...new Set(sentences.flat())].slice(0, 80);
   const out = dataDir(cwd);
   const state = loadState(out);
-  const entries = [];
-  const indexPath = path.join(out, "index.jsonl");
-  if (fs.existsSync(indexPath)) {
-    // Only the newest part of the index is searched, so a prompt costs the same after years of use.
-    // Older remarks stay reachable through /recall and the decisions log.
-    const size = fs.statSync(indexPath).size;
-    const span = Math.min(size, WINDOW_BYTES);
-    const buf = Buffer.alloc(span);
-    const fd = fs.openSync(indexPath, "r");
-    fs.readSync(fd, buf, 0, span, size - span);
-    fs.closeSync(fd);
-    const lines = buf.toString("utf8").split("\n");
-    if (span < size) lines.shift(); // the first line is cut off
-    for (const line of lines) {
-      if (!line) continue;
-      try { entries.push(JSON.parse(line)); } catch { /* skip */ }
-    }
-  }
+  const { entries, signed, sig } = readWindow(out, state);
   const dec = path.join(cwd, "DECISIONS.md");
   if (fs.existsSync(dec)) {
     for (const line of fs.readFileSync(dec, "utf8").split("\n")) {
@@ -187,18 +344,23 @@ export function search(cwd, prompt, { sessionId = "", max = 3, remember = false 
   if (!N) return [];
   const df = new Array(q.length).fill(0);
   let lengthSum = 0;
-  const hits = entries.map((e) => {
+  const qBits = q.map(bitsOf);
+  const hits = entries.map((e, k) => {
     const lx = e.x.toLowerCase();
     lengthSum += lx.length;
     const m = [];
-    for (let i = 0; i < q.length; i++) if (wordStart(lx, q[i]) !== -1) { m.push(i); df[i]++; }
+    const at = k < signed ? k * SIG_BYTES : -1; // entries after the signed ones, and the decisions log, are searched in full
+    for (let i = 0; i < q.length; i++) {
+      if (at >= 0 && qBits[i] && !maybeHas(sig, at, qBits[i])) continue;
+      if (wordStart(lx, q[i]) !== -1) { m.push(i); df[i]++; }
+    }
     return m;
   });
   const meanLength = lengthSum / N;
   // Rare words weigh more. A snippet must share at least two words with one sentence of the prompt,
   // cover half of that sentence, and show enough evidence that the overlap is not chance (see below).
   // The bar is lower while the history is small: there is little to match by chance.
-  const STRICT = Number(process.env.HANDOVER_RECALL_STRICTNESS || 4) * Math.min(1, Math.log(N + 1) / Math.log(200));
+  const STRICT = numberSetting(process.env.HANDOVER_RECALL_STRICTNESS, 4) * Math.min(1, Math.log(N + 1) / Math.log(200));
   const LOGN = Math.log(N);
   const idf = df.map((d) => (d > 0 ? Math.log(1 + N / d) : 0));
   const surprise = df.map((d) => (d > 0 ? Math.log(N / d) : 0)); // how unlikely the word is in a random remark

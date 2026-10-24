@@ -2,6 +2,15 @@
 
 All notable changes to Claude Code handover are written here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/).
 
+## [1.5.0] - 2026-10-24
+
+- Recall matches words in any script. Words are runs of letters, marks and digits as Unicode defines them, so Tamil, Hindi, Chinese and accented European words are matched whole; before, the tokenizer knew only `a-z`, `0-9` and `_`, split "Größe" at the umlaut, and never recalled anything written in another script. Text that writes no spaces between words gives one word per run, which still matches a repeated phrase.
+- Automatic recall is about three times faster per prompt. `sig.bin`, next to `index.jsonl`, holds a 256-byte signature per remark (a Bloom filter of every word and every prefix of it from 3 to 12 characters). A query word is looked for in a remark's text only when its signature allows it, so most of the text searches are never made; a remark whose signature allows a word is still checked in the text, so what recall finds is unchanged (verified on 220 prompts against a 94,000-remark history: identical results on every ASCII prompt, the only differences being the accented words that now match). On the 12 MB window a prompt went from about 125 ms to about 45 ms. An existing index is signed a little on each call, inside the hook's time budget, and a signature file that does not agree with `state.json` is rebuilt from the index; `sig.bin` is safe to delete.
+- `HANDOVER_CONTEXT_LIMIT`, `HANDOVER_STALE_MINUTES`, `HANDOVER_RECALL_WINDOW_MB` and `HANDOVER_RECALL_STRICTNESS` that are not numbers count as unset, as `HANDOVER_CONTEXT_WINDOW` already did. Before, a typo gave `NaN`, every comparison was false, and the guard never warned or asked, silently. `HANDOVER_STALE_MINUTES=0` still means "ask whenever a turn ends above the limit".
+- `scripts/common.mjs` holds what the scripts shared by copy: the config and transcripts folders, the price list (one table, dated, with a fallback to the newest price of a model's family for an id the list does not know), the summing of a request's token counts, and the text of a message. The usage and cache reports name the date of the price list in their first heading.
+- SECURITY.md says that text pasted into an earlier session can come back as a recall line, and how to remove it.
+- Tests for each of these: settings that are not numbers, recall in Tamil and German, the signature file (same results with and without it, rebuilt when it does not match, kept in step with new remarks), and the copy of the scripts still needing nothing outside its folder.
+
 ## [1.4.1] - 2026-10-04
 
 - The guard's limit is now 35% of `HANDOVER_CONTEXT_WINDOW` (still 350,000 tokens with the default 1,000,000), so the window setting moves the limit instead of only the percentage shown. `HANDOVER_CONTEXT_LIMIT` still wins when it is set. A window that is not a positive number counts as unset.
@@ -44,6 +53,7 @@ All notable changes to Claude Code handover are written here. The format follows
 
 - The handover workflow: setup prompt, templates, skill and audit scripts.
 
+[1.5.0]: https://github.com/nrzz/claude-code-handover/compare/v1.4.1...v1.5.0
 [1.4.1]: https://github.com/nrzz/claude-code-handover/compare/v1.4.0...v1.4.1
 [1.4.0]: https://github.com/nrzz/claude-code-handover/compare/v1.3.1...v1.4.0
 [1.3.1]: https://github.com/nrzz/claude-code-handover/compare/v1.3.0...v1.3.1

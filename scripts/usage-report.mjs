@@ -2,42 +2,11 @@
 // Reads <config folder>/projects/**/*.jsonl: ~/.claude, or $CLAUDE_CONFIG_DIR when that is set. Nothing leaves your machine.
 // Usage: node scripts/usage-report.mjs [--root <projects folder>]
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
+import { PRICE_DATE, costOf, priceFor, projectsRoot, tokensOf, walk } from "./common.mjs";
 
-const argRoot = process.argv.indexOf("--root");
 // The folders recall reads: --root, else HANDOVER_PROJECTS_DIR, else <config folder>/projects.
-const CONFIG = (process.env.CLAUDE_CONFIG_DIR || "").trim() ? path.resolve(process.env.CLAUDE_CONFIG_DIR.trim()) : path.join(os.homedir(), ".claude");
-const ROOT = argRoot > -1 ? process.argv[argRoot + 1] : process.env.HANDOVER_PROJECTS_DIR || path.join(CONFIG, "projects");
-
-// $/MTok at published API list prices (2026-10-01): [input, output, cacheRead, cacheWrite5m, cacheWrite1h]
-const PRICE = {
-  "claude-fable-5-1": [10, 50, 0.25, 12.5, 20],
-  "claude-fable-5": [10, 50, 1, 12.5, 20],
-  "claude-opus-5-5": [4, 20, 0.2, 5, 8],
-  "claude-opus-5": [5, 25, 0.5, 6.25, 10],
-  "claude-opus-4-8": [5, 25, 0.5, 6.25, 10],
-  "claude-opus-4-7": [5, 25, 0.5, 6.25, 10],
-  "claude-opus-4-6": [5, 25, 0.5, 6.25, 10],
-  "claude-sonnet-5-5": [2, 10, 0.2, 2.5, 4],
-  "claude-sonnet-5": [2, 10, 0.2, 2.5, 4],
-  "claude-sonnet-4-6": [3, 15, 0.3, 3.75, 6],
-  "claude-haiku-4-5": [1, 5, 0.1, 1.25, 2],
-};
-function priceFor(model) {
-  if (PRICE[model]) return PRICE[model];
-  const k = Object.keys(PRICE).find((p) => model && model.startsWith(p));
-  return k ? PRICE[k] : [5, 25, 0.5, 6.25, 10];
-}
-function walk(dir, out = []) {
-  if (!fs.existsSync(dir)) return out;
-  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-    const p = path.join(dir, e.name);
-    if (e.isDirectory()) walk(p, out);
-    else if (e.name.endsWith(".jsonl")) out.push(p);
-  }
-  return out;
-}
+const ROOT = projectsRoot();
 
 const files = walk(ROOT);
 if (!files.length) { console.log(`No transcripts under ${ROOT}`); process.exit(0); }
@@ -77,20 +46,12 @@ for (const f of files) {
     const rid = o.requestId || m.id;
     if (!rid || !m.usage || requests.has(rid)) continue;
     const u = m.usage;
-    let inp = 0, cw5 = 0, cw1 = 0, cr = 0, out = 0;
-    const its = Array.isArray(u.iterations) && u.iterations.length ? u.iterations : [u];
-    for (const it of its) {
-      inp += it.input_tokens || 0; cr += it.cache_read_input_tokens || 0; out += it.output_tokens || 0;
-      const cc = it.cache_creation || {};
-      cw5 += cc.ephemeral_5m_input_tokens ?? (it.cache_creation_input_tokens || 0);
-      cw1 += cc.ephemeral_1h_input_tokens || 0;
-    }
+    const t = tokensOf(u);
     const think = (u.output_tokens_details && u.output_tokens_details.thinking_tokens) || 0;
-    const [pi, po, pr, pw5, pw1] = priceFor(m.model);
     requests.set(rid, {
       sid, project, ts: o.timestamp || "", model: m.model || "?", effort: o.effort || o.perTurnEffort || "?",
-      sidechain: !!o.isSidechain || isAgentFile, inp, cw: cw5 + cw1, cr, out, think,
-      ctx: inp + cr + cw5 + cw1, cost: (inp * pi + out * po + cr * pr + cw5 * pw5 + cw1 * pw1) / 1e6,
+      sidechain: !!o.isSidechain || isAgentFile, inp: t.inp, cw: t.cw, cr: t.cr, out: t.out, think,
+      ctx: t.inp + t.cr + t.cw, cost: costOf(m.model, t),
     });
   }
 }
@@ -107,7 +68,7 @@ for (const r of requests.values()) {
   perSession.set(r.sid, s);
 }
 let total = 0;
-console.log("=== PER SESSION (estimated weight at API list prices) ===");
+console.log(`=== PER SESSION (estimated weight at API list prices of ${PRICE_DATE}) ===`);
 for (const s of [...perSession.values()].sort((a, b) => b.cost - a.cost)) {
   total += s.cost;
   const prompts = userPrompts.get(s.sid) || 0;

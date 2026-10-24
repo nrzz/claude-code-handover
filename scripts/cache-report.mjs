@@ -2,36 +2,11 @@
 // Reads <config folder>/projects/**/*.jsonl: ~/.claude, or $CLAUDE_CONFIG_DIR when that is set. Nothing leaves your machine.
 // Usage: node scripts/cache-report.mjs [--root <projects folder>]
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
+import { PRICE_DATE, costOf, priceFor, projectsRoot, tokensOf, walk } from "./common.mjs";
 
-const argRoot = process.argv.indexOf("--root");
 // The folders recall reads: --root, else HANDOVER_PROJECTS_DIR, else <config folder>/projects.
-const CONFIG = (process.env.CLAUDE_CONFIG_DIR || "").trim() ? path.resolve(process.env.CLAUDE_CONFIG_DIR.trim()) : path.join(os.homedir(), ".claude");
-const ROOT = argRoot > -1 ? process.argv[argRoot + 1] : process.env.HANDOVER_PROJECTS_DIR || path.join(CONFIG, "projects");
-
-const PRICE = {
-  "claude-fable-5-1": [10, 50, 0.25, 12.5, 20],
-  "claude-fable-5": [10, 50, 1, 12.5, 20],
-  "claude-opus-5-5": [4, 20, 0.2, 5, 8],
-  "claude-opus-5": [5, 25, 0.5, 6.25, 10],
-  "claude-opus-4-8": [5, 25, 0.5, 6.25, 10],
-  "claude-sonnet-5-5": [2, 10, 0.2, 2.5, 4],
-  "claude-sonnet-5": [2, 10, 0.2, 2.5, 4],
-  "claude-haiku-4-5": [1, 5, 0.1, 1.25, 2],
-};
-function priceFor(model) {
-  const k = Object.keys(PRICE).find((p) => model && model.startsWith(p));
-  return k ? PRICE[k] : [5, 25, 0.5, 6.25, 10];
-}
-function walk(dir, out = []) {
-  if (!fs.existsSync(dir)) return out;
-  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-    const p = path.join(dir, e.name);
-    if (e.isDirectory()) walk(p, out); else if (e.name.endsWith(".jsonl")) out.push(p);
-  }
-  return out;
-}
+const ROOT = projectsRoot();
 const fmt = (n) => Math.round(n).toLocaleString("en-US");
 const money = (n) => "$" + n.toFixed(2);
 
@@ -67,19 +42,14 @@ for (const f of files) {
     const m = o.message;
     for (const b of m.content || []) if (b.type === "tool_use") toolUse.set(b.id, { name: b.name, input: b.input || {} });
     const rid = o.requestId || m.id; if (!rid || !m.usage || seen.has(rid)) continue; seen.add(rid);
-    const u = m.usage; let inp = 0, cw5 = 0, cw1 = 0, cr = 0, out = 0;
-    const its = Array.isArray(u.iterations) && u.iterations.length ? u.iterations : [u];
-    for (const it of its) {
-      inp += it.input_tokens || 0; cr += it.cache_read_input_tokens || 0; out += it.output_tokens || 0;
-      const cc = it.cache_creation || {}; cw5 += cc.ephemeral_5m_input_tokens ?? (it.cache_creation_input_tokens || 0); cw1 += cc.ephemeral_1h_input_tokens || 0;
-    }
-    const [pi, po, pr, pw5, pw1] = priceFor(m.model);
-    reqs.push({ sid: o.sessionId, ts: o.timestamp || "", model: m.model || "?", side: !!o.isSidechain || isAgentFile, cw: cw5 + cw1, ctx: inp + cr + cw5 + cw1, cost: (inp * pi + out * po + cr * pr + cw5 * pw5 + cw1 * pw1) / 1e6, cwCost: (cw5 * pw5 + cw1 * pw1) / 1e6 });
+    const t = tokensOf(m.usage);
+    const [, , , pw5, pw1] = priceFor(m.model);
+    reqs.push({ sid: o.sessionId, ts: o.timestamp || "", model: m.model || "?", side: !!o.isSidechain || isAgentFile, cw: t.cw, ctx: t.inp + t.cr + t.cw, cost: costOf(m.model, t), cwCost: (t.cw5 * pw5 + t.cw1 * pw1) / 1e6 });
   }
 }
 reqs.sort((a, b) => (a.ts < b.ts ? -1 : 1));
 
-console.log("=== CACHE RE-WRITE EVENTS (main thread, 50K+ tokens written at once) ===");
+console.log(`=== CACHE RE-WRITE EVENTS (main thread, 50K+ tokens written at once; weights at list prices of ${PRICE_DATE}) ===`);
 const bySession = new Map();
 for (const r of reqs) { if (r.side) continue; const a = bySession.get(r.sid) || []; a.push(r); bySession.set(r.sid, a); }
 const events = []; const causes = {}; const causeCost = {}; let totalCwCost = 0;
