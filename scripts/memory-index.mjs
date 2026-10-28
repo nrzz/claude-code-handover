@@ -18,6 +18,24 @@ const MAX_CHUNKS = 6;
 const SKIP = ["<", "Stop hook feedback", "[Request interrupted", "Another Claude session sent a message", "This session is being continued", "Caveat:", "No response requested"];
 const STOP = new Set(("the a an and or but if then else for to of in on at by with from as is are was were be been being it this that these those i you he she we they me my your our their its not no yes do does did done have has had can could should would will shall may might must just also only very more most less least so such than too into over under about above after before again once here there when where why how what which who whom all any both each few other some own same don now please need want make made get got give gave use used using let lets like one two new old way thing things still even much many well back then them him her out off put see say said tell told know think going come came take took look looks good right okay yes yeah").split(" "));
 
+// --since: a number of hours, days or weeks back ("12h", "7d", "2w"), or a date (YYYY-MM-DD, local midnight).
+const SINCE_UNIT_MS = { h: 3600000, d: 86400000, w: 7 * 86400000 };
+export function parseSince(value, now = Date.now()) {
+  if (value === undefined || value === null) return null;
+  const text = String(value).trim();
+  const ago = /^(\d+)\s*([hdw])$/i.exec(text);
+  if (ago) return now - Number(ago[1]) * SINCE_UNIT_MS[ago[2].toLowerCase()];
+  const day = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
+  if (day) {
+    const [y, m, d] = day.slice(1).map(Number);
+    const date = new Date(y, m - 1, d);
+    if (date.getFullYear() === y && date.getMonth() === m - 1 && date.getDate() === d) return date.getTime();
+  }
+  throw new Error(`--since needs a number of hours, days or weeks (12h, 7d, 2w) or a date (YYYY-MM-DD), not "${text}".`);
+}
+/** When a remark was said: its timestamp, else the end of its day, else 0 (a remark with no date is never "since"). */
+const timeOf = (e) => (e.ts ? Date.parse(e.ts) : e.d ? new Date(Number(e.d.slice(0, 4)), Number(e.d.slice(5, 7)) - 1, Number(e.d.slice(8, 10)), 23, 59, 59, 999).getTime() : 0);
+
 // A word is a run of letters, marks (the vowel signs and accents many scripts write as separate characters) and
 // digits, in any script. Text that writes no spaces between words (Chinese, Japanese) gives one word per run of
 // characters, which still matches a repeated phrase word for word.
@@ -198,7 +216,7 @@ export function updateIndex(cwd, { budgetMs = 2500 } = {}) {
       if (t.length < 12 || SKIP.some((p) => t.startsWith(p))) continue;
       const d = (o.timestamp || "").slice(0, 10);
       for (let i = 0, c = 0; i < t.length && c < MAX_CHUNKS; i += CHUNK, c++) {
-        lines.push(JSON.stringify({ s: sid, n: st.line, d, r: o.type === "user" ? "you" : "claude", x: t.slice(i, i + CHUNK + 80) }));
+        lines.push(JSON.stringify({ s: sid, n: st.line, d, ...(o.timestamp ? { ts: o.timestamp } : {}), r: o.type === "user" ? "you" : "claude", x: t.slice(i, i + CHUNK + 80) }));
       }
     }
     st.offset += lastNl + 1;
@@ -283,12 +301,13 @@ function logChoose(n, k) {
 /**
  * The newest part of the index, and the signatures of the entries that have one. Only the newest WINDOW_BYTES are
  * searched, so a prompt costs the same after years of use; older remarks stay reachable through /recall and the
- * decisions log. Returns { entries, signed, sig }: the first `signed` entries have their signature in `sig`.
+ * decisions log. Returns { entries, sig }: an entry with a signature carries `sigAt`, its byte offset in `sig`;
+ * one without has sigAt -1, and is searched in full.
  */
 function readWindow(out, state) {
   const indexPath = path.join(out, "index.jsonl");
   const entries = [];
-  if (!fs.existsSync(indexPath)) return { entries, signed: 0, sig: null };
+  if (!fs.existsSync(indexPath)) return { entries, sig: null };
   const size = fs.statSync(indexPath).size;
   const span = Math.min(size, WINDOW_BYTES);
   const buf = Buffer.alloc(span);
@@ -308,7 +327,7 @@ function readWindow(out, state) {
     const startByte = windowStart + pos;
     pos = nl + 1;
     if (!e) continue;
-    if (startByte < signedUpTo) signed++; // the signed part of the file is its head, so these come first
+    if (startByte < signedUpTo) { e.sigAt = signed * SIG_BYTES; signed++; } else e.sigAt = -1; // the signed part of the file is its head, so these come first
     entries.push(e);
   }
   let sig = null;
@@ -322,22 +341,30 @@ function readWindow(out, state) {
       if (got !== sig.length) sig = null;
     } catch { sig = null; }
   }
-  return { entries, signed: sig ? signed : 0, sig };
+  if (!sig) for (const e of entries) e.sigAt = -1;
+  return { entries, sig };
 }
 
 // Returns up to `max` past snippets. The prompt is matched sentence by sentence, so a long message
 // with instructions around one real question still finds what was said about that question.
-export function search(cwd, prompt, { sessionId = "", max = 3, remember = false } = {}) {
+export function search(cwd, prompt, { sessionId = "", max = 3, remember = false, since = null } = {}) {
+  const sinceMs = typeof since === "number" ? since : parseSince(since);
   const sentences = prompt.split(/[.?!\n;]+/).map((s) => terms(s)).filter((s) => s.length >= 2).slice(0, 16);
   if (!sentences.length) return [];
   const q = [...new Set(sentences.flat())].slice(0, 80);
   const out = dataDir(cwd);
   const state = loadState(out);
-  const { entries, signed, sig } = readWindow(out, state);
+  const window = readWindow(out, state);
+  const sig = window.sig;
+  // The date filter runs after the window is read, so that each entry keeps the signature it was aligned with.
+  const entries = sinceMs === null ? window.entries : window.entries.filter((e) => timeOf(e) >= sinceMs);
   const dec = path.join(cwd, "DECISIONS.md");
   if (fs.existsSync(dec)) {
     for (const line of fs.readFileSync(dec, "utf8").split("\n")) {
-      if (/^- \d{4}-\d{2}-\d{2}/.test(line)) entries.push({ s: "DECISIONS", d: line.slice(2, 12), r: "log", x: line.slice(13).trim(), dec: 1 });
+      if (!/^- \d{4}-\d{2}-\d{2}/.test(line)) continue;
+      const e = { s: "DECISIONS", d: line.slice(2, 12), r: "log", x: line.slice(13).trim(), dec: 1, sigAt: -1 };
+      if (sinceMs !== null && timeOf(e) < sinceMs) continue;
+      entries.push(e);
     }
   }
   const N = entries.length;
@@ -345,11 +372,11 @@ export function search(cwd, prompt, { sessionId = "", max = 3, remember = false 
   const df = new Array(q.length).fill(0);
   let lengthSum = 0;
   const qBits = q.map(bitsOf);
-  const hits = entries.map((e, k) => {
+  const hits = entries.map((e) => {
     const lx = e.x.toLowerCase();
     lengthSum += lx.length;
     const m = [];
-    const at = k < signed ? k * SIG_BYTES : -1; // entries after the signed ones, and the decisions log, are searched in full
+    const at = e.sigAt; // -1 for an entry without a signature (not signed yet, or the decisions log): searched in full
     for (let i = 0; i < q.length; i++) {
       if (at >= 0 && qBits[i] && !maybeHas(sig, at, qBits[i])) continue;
       if (wordStart(lx, q[i]) !== -1) { m.push(i); df[i]++; }

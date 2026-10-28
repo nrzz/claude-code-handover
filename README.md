@@ -177,6 +177,7 @@ node scripts/cache-report.mjs
 
 ```bash
 node scripts/recall.mjs the topic
+node scripts/recall.mjs migration --since 7d
 ```
 
 ```bash
@@ -185,7 +186,7 @@ node scripts/selftest.mjs --replay
 
 The last one is the stress test described below; with `--replay` it also measures recall on your own history, read from the folders recall reads (`CLAUDE_CONFIG_DIR`, `HANDOVER_PROJECTS_DIR` and `HANDOVER_DATA_DIR` apply), and prints how many tokens it adds.
 
-Dollar figures are estimates at published API list prices, the yardstick for how fast subscription limits fill; the price list and its date are in `scripts/common.mjs`, and the first heading of each report names the date. A model id the list does not know is weighed at the newest price of its family. Pass `--root <path>` to point at another projects folder, and `--all` to recall across every project.
+Dollar figures are estimates at published API list prices, the yardstick for how fast subscription limits fill; the price list and its date are in `scripts/common.mjs`, and the first heading of each report names the date. A model id the list does not know is weighed at the newest price of its family. Pass `--root <path>` to point at another projects folder, `--all` to recall across every project, and `--since` (such as `7d`, `12h`, `2w` or `YYYY-MM-DD`) to narrow recall to recent work.
 
 ## What was verified, and how
 

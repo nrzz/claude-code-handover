@@ -8,6 +8,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { ROOT, exists, projectKey, read, runInit, withBox, write, writeTranscript } from "./helpers.mjs";
+import { parseSince, search } from "../scripts/memory-index.mjs";
 
 /** Run one of the repository's scripts in the project folder. `drop` lists environment variables to remove. */
 function script(box, name, args, { env = {}, drop = [] } = {}) {
@@ -65,6 +66,77 @@ test("recall finds what was said in the transcripts of the config folder", withB
   assert.match(found.stdout, /warm-cache setting/);
   const none = script(box, "recall.mjs", ["invoice", "exporter"], { drop: [...BARE, "CLAUDE_CONFIG_DIR"] }); // ~/.claude/projects has nothing
   assert.match(none.stdout, /^No match for "invoice exporter"/);
+}));
+
+test("parseSince reads hours, days and weeks back, and dates as local midnight", () => {
+  const now = Date.parse("2026-10-20T12:00:00.000Z");
+  assert.equal(parseSince(undefined, now), null);
+  assert.equal(parseSince(null, now), null);
+  assert.equal(parseSince("12h", now), now - 12 * 3600000);
+  assert.equal(parseSince("7d", now), now - 7 * 86400000);
+  assert.equal(parseSince("2w", now), now - 14 * 86400000);
+  assert.equal(parseSince("7D", now), now - 7 * 86400000);
+  assert.equal(parseSince("2026-09-01", now), new Date(2026, 8, 1).getTime());
+  for (const bad of ["", "7", "d", "7m", "7 days", "-7d", "2026-13-01", "2026-02-30", "yesterday"]) {
+    assert.throws(() => parseSince(bad), /--since needs a number of hours, days or weeks \(12h, 7d, 2w\) or a date \(YYYY-MM-DD\)/);
+  }
+});
+
+test("recall --since filters remarks by session timestamp, and rejects bad formats", withBox((box) => {
+  const config = path.join(box.root, "elsewhere");
+  const older = writeTranscript(transcriptsIn(config), box.project, "11111111-aaaa-4aaa-8aaa-000000000001");
+  const oldRows = [
+    { type: "custom-title", customTitle: "Old session", sessionId: "11111111-aaaa-4aaa-8aaa-000000000001" },
+    { type: "user", timestamp: "2026-09-01T10:00:00Z", message: { role: "user", content: "Which cache setting did we pick for the invoice exporter, and why?" } },
+    { type: "assistant", timestamp: "2026-09-01T10:00:05Z", message: { role: "assistant", content: [{ type: "text", text: "We picked the warm-cache setting for the invoice exporter because cold starts took eleven seconds." }], usage: { input_tokens: 10, cache_read_input_tokens: 1000, output_tokens: 50 } } },
+  ];
+  write(older, oldRows.map((r) => JSON.stringify(r)).join("\n") + "\n");
+
+  const newer = path.join(transcriptsIn(config).projects, key(box), "22222222-aaaa-4aaa-8aaa-000000000002.jsonl");
+  const newRows = [
+    { type: "custom-title", customTitle: "Recent session", sessionId: "22222222-aaaa-4aaa-8aaa-000000000002" },
+    { type: "user", timestamp: "2026-10-15T10:00:00Z", message: { role: "user", content: "Check the invoice exporter status." } },
+    { type: "assistant", timestamp: "2026-10-15T10:00:05Z", message: { role: "assistant", content: [{ type: "text", text: "The invoice exporter is running with warm-cache enabled." }], usage: { input_tokens: 10, cache_read_input_tokens: 1000, output_tokens: 50 } } },
+  ];
+  write(newer, newRows.map((r) => JSON.stringify(r)).join("\n") + "\n");
+
+  const allHits = script(box, "recall.mjs", ["invoice", "exporter"], { env: { CLAUDE_CONFIG_DIR: config }, drop: BARE });
+  assert.equal(allHits.status, 0);
+  assert.match(allHits.stdout, /4 match\(es\) for "invoice exporter"/);
+
+  const sinceRecent = script(box, "recall.mjs", ["invoice", "exporter", "--since", "2026-10-01"], { env: { CLAUDE_CONFIG_DIR: config }, drop: BARE });
+  assert.equal(sinceRecent.status, 0);
+  assert.match(sinceRecent.stdout, /2 match\(es\) for "invoice exporter"/);
+  assert.match(sinceRecent.stdout, /Recent session/);
+  assert.ok(!sinceRecent.stdout.includes("Old session"));
+
+  const none = script(box, "recall.mjs", ["invoice", "exporter", "--since", "2026-10-20"], { env: { CLAUDE_CONFIG_DIR: config }, drop: BARE });
+  assert.equal(none.status, 0);
+  assert.match(none.stdout, /^No match for "invoice exporter"/);
+
+  const bad = script(box, "recall.mjs", ["invoice", "exporter", "--since", "not-a-date"], { env: { CLAUDE_CONFIG_DIR: config }, drop: BARE });
+  assert.equal(bad.status, 1);
+  assert.match(bad.stderr, /--since needs a number of hours, days or weeks/);
+}));
+
+test("search in memory-index filters past remarks with { since }", withBox((box) => {
+  const origData = process.env.HANDOVER_DATA_DIR;
+  const origProj = process.env.HANDOVER_PROJECTS_DIR;
+  process.env.HANDOVER_DATA_DIR = box.data;
+  process.env.HANDOVER_PROJECTS_DIR = box.projects;
+  try {
+    writeTranscript(box, box.project);
+    script(box, "memory-index.mjs", ["--build"]);
+    const found = search(box.project, "Which cache setting did we pick for the invoice exporter?", { since: "2026-09-01" });
+    assert.ok(found.length >= 1);
+    assert.match(found[0].text, /warm-cache setting/);
+
+    const filteredOut = search(box.project, "Which cache setting did we pick for the invoice exporter?", { since: "2026-10-05" });
+    assert.equal(filteredOut.length, 0);
+  } finally {
+    if (origData !== undefined) process.env.HANDOVER_DATA_DIR = origData; else delete process.env.HANDOVER_DATA_DIR;
+    if (origProj !== undefined) process.env.HANDOVER_PROJECTS_DIR = origProj; else delete process.env.HANDOVER_PROJECTS_DIR;
+  }
 }));
 
 test("the index's state file is not rewritten when no transcript has anything new", withBox((box) => {
