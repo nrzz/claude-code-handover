@@ -475,3 +475,23 @@ test("the signature file skips text searches without changing what recall finds,
   const retry = mem.search(box.project, "How many times does the uploader retry a failed chunk?", { sessionId: "new" });
   assert.ok(retry.length >= 1 && retry[0].text.includes("three times"), JSON.stringify(retry));
 })));
+
+test("the since filter leaves old remarks out and keeps each remark that stays with its own signature", withBox((box) => inBox(box, () => {
+  const sid = "55555555-aaaa-4aaa-8aaa-000000000005";
+  const remark = (timestamp, text) => ({ type: "assistant", timestamp, message: { role: "assistant", content: [{ type: "text", text }], usage: {} } });
+  const rows = [];
+  for (let i = 0; i < 40; i++) rows.push(remark("2026-09-01T10:00:00Z", `Old remark ${i} about the ${["parser", "scheduler", "renderer", "uploader"][i % 4]} module and its ${["tests", "docs", "metrics"][i % 3]}.`));
+  for (let i = 0; i < 10; i++) rows.push(remark("2026-10-15T09:00:00Z", `Recent remark ${i} about the ${["parser", "scheduler", "renderer", "uploader"][i % 4]} module and its ${["tests", "docs", "metrics"][i % 3]}.`));
+  rows.push(remark("2026-10-15T10:00:00Z", "The retention window for uploads is now forty days."));
+  write(path.join(box.projects, key(box), `${sid}.jsonl`), rows.map((r) => JSON.stringify(r)).join("\n") + "\n");
+  build(box);
+  const dir = mem.dataDir(box.project);
+  assert.equal(JSON.parse(read(path.join(dir, "state.json"))).sig.entries, 51, "every remark is signed");
+  // The 11 remarks that stay are the index's last 11: each must be checked against its own signature, not the one at its new position.
+  const ask = "What is the retention window for uploads?";
+  const found = mem.search(box.project, ask, { sessionId: "new", since: "2026-10-01" });
+  assert.ok(found.length >= 1 && /forty days/.test(found[0].text), JSON.stringify(found));
+  fs.rmSync(path.join(dir, "sig.bin"));
+  assert.deepEqual(mem.search(box.project, ask, { sessionId: "new", since: "2026-10-01" }), found, "the same result without the signature file");
+  assert.deepEqual(mem.search(box.project, ask, { sessionId: "new", since: "2026-10-16" }), [], "and nothing from before the since moment");
+})));
