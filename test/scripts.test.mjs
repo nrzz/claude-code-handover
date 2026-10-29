@@ -495,3 +495,89 @@ test("the since filter leaves old remarks out and keeps each remark that stays w
   assert.deepEqual(mem.search(box.project, ask, { sessionId: "new", since: "2026-10-01" }), found, "the same result without the signature file");
   assert.deepEqual(mem.search(box.project, ask, { sessionId: "new", since: "2026-10-16" }), [], "and nothing from before the since moment");
 })));
+
+test("recall --who filters user messages, assistant responses and notes", withBox((box) => {
+  const config = path.join(box.root, "elsewhere");
+  const transcript = writeTranscript(transcriptsIn(config), box.project);
+
+  const rows = [
+    {
+      type: "custom-title",
+      customTitle: "Cache session",
+      sessionId: "33333333-aaaa-4aaa-8aaa-000000000003",
+    },
+    {
+      type: "user",
+      timestamp: "2026-10-15T10:00:00Z",
+      message: {
+        role: "user",
+        content: "Which invoice exporter cache setting did we choose?",
+      },
+    },
+    {
+      type: "assistant",
+      timestamp: "2026-10-15T10:00:05Z",
+      message: {
+        role: "assistant",
+        content: "We chose the warm invoice exporter cache setting.",
+      },
+    },
+  ];
+  write(transcript, rows.map((r) => JSON.stringify(r)).join("\n") + "\n");
+
+  write(
+    path.join(box.project, "DECISIONS.md"),
+    "- 2026-10-16 invoice exporter cache decision: use warm-cache.\n",
+  );
+
+  const options = {
+    env: { CLAUDE_CONFIG_DIR: config },
+    drop: BARE,
+  };
+
+  const you = script(
+    box, "recall.mjs",
+    ["invoice", "exporter", "--who", "you"],
+    options,
+  );
+  assert.equal(you.status, 0, you.stderr);
+  assert.match(you.stdout, /1 match\(es\) for "invoice exporter" from you/);
+  assert.match(you.stdout, /Which invoice exporter cache setting/);
+  assert.doesNotMatch(you.stdout, /We chose the warm invoice exporter/);
+
+  const claude = script(
+    box, "recall.mjs",
+    ["invoice", "exporter", "--who", "claude"],
+    options,
+  );
+  assert.equal(claude.status, 0, claude.stderr);
+  assert.match(claude.stdout, /1 match\(es\) for "invoice exporter" from claude/);
+  assert.match(claude.stdout, /We chose the warm invoice exporter/);
+  assert.doesNotMatch(claude.stdout, /Which invoice exporter cache setting/);
+
+  const notes = script(
+    box, "recall.mjs",
+    ["invoice", "exporter", "--who", "notes"],
+    options,
+  );
+  assert.equal(notes.status, 0, notes.stderr);
+  assert.match(notes.stdout, /1 match\(es\) for "invoice exporter" from notes/);
+  assert.match(notes.stdout, /DECISIONS\.md/);
+  assert.doesNotMatch(notes.stdout, /We chose the warm invoice exporter/);
+
+  const combined = script(
+    box, "recall.mjs",
+    ["invoice", "exporter", "--who", "you", "--since", "2026-10-01", "--limit", "1", "--all"],
+    options,
+  );
+  assert.equal(combined.status, 0, combined.stderr);
+  assert.match(combined.stdout, /1 match\(es\) for "invoice exporter" from you/);
+
+  const bad = script(
+    box, "recall.mjs",
+    ["invoice", "exporter", "--who", "invalid"],
+    options,
+  );
+  assert.equal(bad.status, 1);
+  assert.match(bad.stderr, /--who needs you, claude or notes/);
+}));

@@ -1,8 +1,9 @@
 // Recall: search every past Claude Code transcript of this project for a topic.
 // Prints the matching things you and Claude said, with date and session title, newest first.
-// Usage: node recall.mjs <word or words> [--all] [--limit N] [--since <when>] [--root <projects folder>]
+// Usage: node recall.mjs <word or words> [--all] [--limit N] [--since <when>] [--who <you|claude|notes>] [--root <projects folder>]
 //   --all    search every project on this machine, not only the current folder's
 //   --since  only what was said since then: a number of hours, days or weeks back (12h, 7d, 2w) or a date (YYYY-MM-DD)
+//   --who    only matches from you (user), Claude (assistant), or saved notes
 // Nothing leaves your machine. Transcripts live in ~/.claude/projects ($CLAUDE_CONFIG_DIR/projects when that is set).
 import fs from "node:fs";
 import path from "node:path";
@@ -30,10 +31,18 @@ if (rawSince !== null) {
     process.exit(1);
   }
 }
+const rawWho = opt("--who", null);
+const WHO_ROLES = { you: "user", claude: "assistant", notes: "note" };
+
+if (rawWho !== null && !Object.hasOwn(WHO_ROLES, rawWho)) {
+  console.error("--who needs you, claude or notes");
+  process.exit(1);
+}
+const WHO = rawWho === null ? null : WHO_ROLES[rawWho];
 // Claude Code keeps its transcripts in <config folder>/projects: $CLAUDE_CONFIG_DIR when that is set, else ~/.claude.
 const ROOT = opt("--root", process.env.HANDOVER_PROJECTS_DIR || path.join(configDir(), "projects"));
 const words = args.join(" ").trim().toLowerCase().split(/\s+/).filter(Boolean);
-if (!words.length) { console.log("Usage: node recall.mjs <word or words> [--all] [--limit N] [--since <when>]"); process.exit(0); }
+if (!words.length) { console.log("Usage: node recall.mjs <word or words> [--all] [--limit N] [--since <when>] [--who <you|claude|notes>]"); process.exit(0); }
 
 const projectKey = process.cwd().replace(/[^A-Za-z0-9]/g, "-");
 const dirs = ALL ? fs.readdirSync(ROOT).map((d) => path.join(ROOT, d)) : [path.join(ROOT, projectKey)];
@@ -84,10 +93,15 @@ for (const f of ["DECISIONS.md", "HANDOVER.md"]) {
     }
   }
 }
-
+if (WHO !== null) {
+  for (let i = hits.length - 1; i >= 0; i--) {
+    if (hits[i].role !== WHO) hits.splice(i, 1);
+  }
+}
 hits.sort((a, b) => (a.ts < b.ts ? 1 : -1));
 if (!hits.length) { console.log(`No match for "${words.join(" ")}" in ${ALL ? "any project" : "this project's"} transcripts${ALL ? "" : ` (${projectKey})`}.`); process.exit(0); }
-console.log(`${hits.length} match(es) for "${words.join(" ")}", newest first${hits.length > LIMIT ? `, showing ${LIMIT}` : ""}:\n`);
+const whoLabel = rawWho === null ? "" : ` from ${rawWho}`;
+console.log(`${hits.length} match(es) for "${words.join(" ")}"${whoLabel}, newest first${hits.length > LIMIT ? `, showing ${LIMIT}` : ""}:\n`);
 for (const h of hits.slice(0, LIMIT)) {
   const when = h.ts === "9999" ? "current notes" : h.ts.slice(0, 16).replace("T", " ");
   console.log(`[${when}] ${h.title || h.project || "(untitled session)"} | ${h.role}\n  ${h.text}\n`);
