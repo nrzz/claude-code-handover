@@ -2,6 +2,11 @@
 
 All notable changes to Claude Code handover are written here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+- `recall.mjs --project <folder>` searches only the transcripts and saved notes for one project path, resolved relative to the current folder. It cannot be combined with `--all`; a project without transcripts reports no match and exits 0. Without `--project`, the current-project behavior is unchanged.
+- Regression coverage for absolute and relative project paths, project-specific notes, missing transcript folders, and the `--all` conflict.
+
 ## [1.7.0] - 2026-11-03
 
 - `recall.mjs` names the filters that were on in both of its summary lines, with the values as typed: `No match for "migration" from claude since 7d in this project's transcripts (...)` and `3 match(es) for "migration" from you since 2026-10-01, newest first:`. Before, the "No match" line read as if the topic had never come up when it only meant that nothing matched within the filters, and the heading named `--who` but not `--since`. With neither flag both lines read as before; a search with no match still exits 0; `--all` and `, showing N` keep their places. Thanks to [@Vamsi-2581](https://github.com/Vamsi-2581) in [#10](https://github.com/nrzz/claude-code-handover/pull/10), for the good first issue [#9](https://github.com/nrzz/claude-code-handover/issues/9).

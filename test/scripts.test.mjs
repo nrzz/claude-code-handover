@@ -601,3 +601,54 @@ test("recall --who filters user messages, assistant responses and notes", withBo
   assert.equal(bad.status, 1);
   assert.match(bad.stderr, /--who needs you, claude or notes/);
 }));
+  
+test("recall --project searches only that folder's transcripts and notes", withBox((box) => {
+  const config = path.join(box.root, "elsewhere");
+  const currentTranscript = writeTranscript(transcriptsIn(config), box.project);
+  const otherProject = path.join(box.root, "another-project");
+  const otherTranscript = writeTranscript(transcriptsIn(config), otherProject, "55555555-aaaa-4aaa-8aaa-000000000005");
+  const currentRow = {
+    type: "user",
+    timestamp: "2026-10-16T10:00:00Z",
+    message: { role: "user", content: "currentproject anchor" },
+  };
+  const otherRow = {
+    type: "user",
+    timestamp: "2026-10-16T10:00:00Z",
+    message: { role: "user", content: "selectedproject transcriptmarker" },
+  };
+  fs.appendFileSync(currentTranscript, `${JSON.stringify(currentRow)}\n`);
+  fs.appendFileSync(otherTranscript, `${JSON.stringify(otherRow)}\n`);
+  write(path.join(otherProject, "DECISIONS.md"), "- 2026-10-16 selectedproject noteanchor saved note.\n");
+
+  const options = { env: { CLAUDE_CONFIG_DIR: config }, drop: BARE };
+  const absolute = script(box, "recall.mjs", ["selectedproject", "transcriptmarker", "--project", otherProject], options);
+  assert.equal(absolute.status, 0, absolute.stderr);
+  assert.match(absolute.stdout, /^1 match\(es\) for "selectedproject transcriptmarker"/);
+  assert.match(absolute.stdout, /selectedproject transcriptmarker/);
+
+  const relative = script(box, "recall.mjs", ["selectedproject", "transcriptmarker", "--project", "../another-project"], options);
+  assert.equal(relative.status, 0, relative.stderr);
+  assert.match(relative.stdout, /selectedproject transcriptmarker/);
+
+  const notes = script(box, "recall.mjs", ["selectedproject", "noteanchor", "--project", otherProject, "--who", "notes"], options);
+  assert.equal(notes.status, 0, notes.stderr);
+  assert.match(notes.stdout, /DECISIONS\.md/);
+  assert.match(notes.stdout, /selectedproject noteanchor/);
+
+  const currentOnly = script(box, "recall.mjs", ["currentproject", "anchor", "--project", otherProject], options);
+  assert.equal(currentOnly.status, 0, currentOnly.stderr);
+  assert.match(currentOnly.stdout, /^No match for "currentproject anchor" in that project's transcripts/);
+
+  const missingProject = script(box, "recall.mjs", ["missing", "--project", path.join(box.root, "missing-project")], options);
+  assert.equal(missingProject.status, 0, missingProject.stderr);
+  assert.match(missingProject.stdout, /^No match for "missing" in that project's transcripts/);
+
+  const conflict = script(box, "recall.mjs", ["invoice", "--project", otherProject, "--all"], options);
+  assert.equal(conflict.status, 1);
+  assert.match(conflict.stderr, /--project and --all cannot be used together/);
+
+  const missingValue = script(box, "recall.mjs", ["invoice", "--project"], options);
+  assert.equal(missingValue.status, 1);
+  assert.match(missingValue.stderr, /--project needs a folder/);
+}));
