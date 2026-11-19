@@ -2,10 +2,12 @@
 
 All notable changes to Claude Code handover are written here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.8.0] - 2026-11-19
 
-- `recall.mjs --project <folder>` searches only the transcripts and saved notes for one project path, resolved relative to the current folder. It cannot be combined with `--all`; a project without transcripts reports no match and exits 0. Without `--project`, the current-project behavior is unchanged.
-- Regression coverage for absolute and relative project paths, project-specific notes, missing transcript folders, and the `--all` conflict.
+- `recall.mjs --project <folder>` searches one other project's transcripts and saved notes without `--all`: the folder is resolved from the current folder (absolute, relative, forward or back slashes, a trailing slash), turned into the transcript folder's name the way the current folder's is, and DECISIONS.md and HANDOVER.md are read from that folder too. The "No match" line says `that project's` instead of `this project's`; a folder with no transcripts is a plain "No match" and exit 0; `--project` with `--all` is an error (exit 1), and so is `--project` with no folder. Without the flag nothing changes. Thanks to [@Vamsi-2581](https://github.com/Vamsi-2581) in [#12](https://github.com/nrzz/claude-code-handover/pull/12), for the good first issue [#11](https://github.com/nrzz/claude-code-handover/issues/11).
+- A test for an absolute and a relative project path, the named project's notes, the other project's hits staying out, a missing transcript folder, and the two errors. The pull request's tests ran on Windows, macOS and Linux with Node 18 to 24 before the merge, and the release commit's ten jobs were green too.
+
+The next good first issue is [#13](https://github.com/nrzz/claude-code-handover/issues/13): `--project` says so when the folder and its transcripts both do not exist.
 
 ## [1.7.0] - 2026-11-03
 
@@ -70,6 +72,7 @@ All notable changes to Claude Code handover are written here. The format follows
 
 - The handover workflow: setup prompt, templates, skill and audit scripts.
 
+[1.8.0]: https://github.com/nrzz/claude-code-handover/compare/v1.7.0...v1.8.0
 [1.7.0]: https://github.com/nrzz/claude-code-handover/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/nrzz/claude-code-handover/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/nrzz/claude-code-handover/compare/v1.4.1...v1.5.0

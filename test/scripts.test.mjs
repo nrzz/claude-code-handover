@@ -601,7 +601,7 @@ test("recall --who filters user messages, assistant responses and notes", withBo
   assert.equal(bad.status, 1);
   assert.match(bad.stderr, /--who needs you, claude or notes/);
 }));
-  
+
 test("recall --project searches only that folder's transcripts and notes", withBox((box) => {
   const config = path.join(box.root, "elsewhere");
   const currentTranscript = writeTranscript(transcriptsIn(config), box.project);
